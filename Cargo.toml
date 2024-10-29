@@ -2,7 +2,7 @@
 name = "aksr"
 version = "0.0.1"
 edition = "2021"
-description = "A macro"
+description = "A Rust derive macro designed to automatically generate getter and setter methods for both named and tuple structs."
 repository = "https://github.com/jamjamjon/aksr"
 authors = ["Jamjamjon <xxyydzml@outlook.com>"]
 license = "MIT"

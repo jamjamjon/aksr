@@ -1,3 +1,83 @@
+//! # aksr
+//!
+//! `aksr` is a Rust derive macro designed to simplify struct management by automatically generating getter and setter methods for both named and tuple structs.
+//!
+//!
+//! ## Example: Named Struct
+//!
+//! This example demonstrates the use of `aksr` with a named struct, `Rect`. The `attrs` field is set with an alias, a custom setter prefix, and the ability to increment values, while disabling the generation of a getter method for `attrs`.
+//!
+//! ```rust
+//! use aksr::Builder;
+//!
+//! #[derive(Builder, Debug, Default)]
+//! struct Rect {
+//!     x: f32,
+//!     y: f32,
+//!     w: f32,
+//!     h: f32,
+//!     #[args(
+//!         alias = "attributes",
+//!         setter_prefix = "set",
+//!         inc = true,
+//!         getter = false
+//!     )]
+//!     attrs: Vec<String>,
+//! }
+//!
+//! let rect = Rect::default()
+//!     .with_x(0.0)
+//!     .with_y(0.0)
+//!     .with_w(10.0)
+//!     .with_h(5.0)
+//!     .set_attributes(&["A", "X", "Z"])
+//!     .set_attributes_inc(&["O"])
+//!     .set_attributes_inc(&["P"]);
+//!
+//! println!("rect: {:?}", rect);
+//! println!("x: {}", rect.x());
+//! println!("y: {}", rect.y());
+//! println!("w: {}", rect.w());
+//! println!("h: {}", rect.h());
+//! println!("attrs: {:?}", rect.attrs);
+//! // println!("attrs: {:?}", rect.attrs()); // Method `attrs` is not generated
+//! ```
+//!
+//! ## Example: Tuple Struct
+//!
+//! Here, `aksr` is used with a tuple struct, `Color`. The example demonstrates customizing getter and setter prefixes, defining an alias for a specific field, and configuring one field to be incrementable.
+//!
+//! ```rust
+//! use aksr::Builder;
+//!
+//! #[derive(Builder, Default, Debug)]
+//! struct Color<'a>(
+//!     u8,
+//!     u8,
+//!     u8,
+//!     #[args(alias = "alpha")] f32,
+//!     #[args(inc = true, getter_prefix = "get", setter_prefix = "set")] Vec<&'a str>,
+//! );
+//!
+//! let color = Color::default()
+//!     .with_0(255)
+//!     .with_1(255)
+//!     .with_2(0)
+//!     .with_alpha(0.8)
+//!     .set_4(&["A", "B", "C"])
+//!     .set_4_inc(&["D", "E"]);
+//!
+//! println!(
+//!     "RGBA: ({}, {}, {}, {}, {:?})",
+//!     color.nth_0(),
+//!     color.nth_1(),
+//!     color.nth_2(),
+//!     color.alpha(),
+//!     color.get_4(),
+//! );
+//! ```
+//!
+
 use proc_macro::TokenStream;
 use proc_macro2::{Ident, Span};
 use quote::quote;
