@@ -6,7 +6,12 @@ struct Rect {
     y: f32,
     w: f32,
     h: f32,
-    #[args(alias = "attributes", prefix = "add", inc = true, getter = false)]
+    #[args(
+        alias = "attributes",
+        setter_prefix = "set",
+        inc = true,
+        getter = false
+    )]
     attrs: Vec<String>,
 }
 
@@ -16,14 +21,15 @@ fn main() {
         .with_y(0.)
         .with_w(10.)
         .with_h(5.)
-        .add_attributes(&["A", "X", "Z"])
-        .add_attributes_inc(&["O"])
-        .add_attributes_inc(&["P"]);
+        .set_attributes(&["A", "X", "Z"])
+        .set_attributes_inc(&["O"])
+        .set_attributes_inc(&["P"]);
 
     println!("rect: {:?}", rect);
-    println!("x: {:?}", rect.x());
-    println!("y: {:?}", rect.y());
-    println!("w: {:?}", rect.w());
-    println!("h: {:?}", rect.h());
+    println!("x: {}", rect.x());
+    println!("y: {}", rect.y());
+    println!("w: {}", rect.w());
+    println!("h: {}", rect.h());
     println!("attrs: {:?}", rect.attrs);
+    // println!("attrs: {:?}", rect.attrs()); // no method named `attrs`
 }

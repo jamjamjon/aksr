@@ -2,16 +2,26 @@ use proc_macro::TokenStream;
 use proc_macro2::{Ident, Span};
 use quote::quote;
 use syn::{
-    parse_macro_input, punctuated::Punctuated, Data, DeriveInput, Expr, GenericArgument, Lit, Meta,
-    Token, Type,
+    parse_macro_input, Data, DataStruct, DeriveInput, Field, GenericArgument, Index, PathArguments,
+    Type,
 };
+
+mod misc;
+use misc::{Fns, Rules, Tys};
 
 const ARGS: &str = "args";
 const ALIAS: &str = "alias";
 const GETTER: &str = "getter";
 const SETTER: &str = "setter";
-const PREFIX: &str = "prefix";
+const SETTER_PREFIX: &str = "setter_prefix";
+const GETTER_PREFIX: &str = "getter_prefix";
 const INC_FOR_VEC: &str = "inc";
+const SETTER_PREFIX_DEFAULT: &str = "with";
+const GETTER_PREFIX_DEFAULT: &str = "nth";
+const PRIMITIVE_TYPES: &[&str] = &[
+    "i8", "i16", "i32", "i64", "i128", "isize", "u8", "u16", "u32", "u64", "u128", "usize", "bool",
+    "char", "unit", "f32", "f64",
+];
 
 #[proc_macro_derive(Builder, attributes(args))]
 pub fn derive(x: TokenStream) -> TokenStream {
@@ -20,115 +30,63 @@ pub fn derive(x: TokenStream) -> TokenStream {
     TokenStream::from(expanded)
 }
 
-struct Rules {
-    pub alias: Option<Ident>,
-    pub inc_for_vec: bool,
-    pub prefix_setter: String,
-    pub gen_getter: bool,
-    pub gen_setter: bool,
-}
+fn build_expanded(st: DeriveInput) -> proc_macro2::TokenStream {
+    // generate code
+    let code = match &st.data {
+        Data::Struct(data) => generate_from_struct(data),
+        Data::Enum(_) | Data::Union(_) => panic!("Builder(aksr) can only be derived for struct"),
+    };
 
-impl Default for Rules {
-    fn default() -> Self {
-        Self {
-            alias: None,
-            inc_for_vec: false,
-            prefix_setter: "with".into(),
-            gen_getter: true,
-            gen_setter: true,
+    // attrs
+    let (struct_name, (impl_generics, ty_generics, where_clause)) =
+        (&st.ident, &st.generics.split_for_impl());
+
+    // token stream
+    quote! {
+        impl #impl_generics #struct_name #ty_generics #where_clause {
+            #code
         }
     }
 }
 
-impl Rules {
-    fn gen_setter_name(&self, field_name: &Ident) -> Ident {
-        let setter_name = match &self.alias {
-            None => format!("{}_{}", self.prefix_setter, field_name),
-            Some(alias) => format!("{}_{}", self.prefix_setter, alias),
-        };
-        Ident::new(&setter_name, Span::call_site())
-    }
-}
-
-fn build_expanded(st: DeriveInput) -> proc_macro2::TokenStream {
-    // basics
-    let fields = match &st.data {
-        Data::Struct(data) => &data.fields,
-        _ => panic!("Builder can only be derived for struct"),
-    };
-    let struct_name = &st.ident;
-    let (impl_generics, ty_generics, where_clause) = &st.generics.split_for_impl();
-
+fn generate_from_struct(data_struct: &DataStruct) -> proc_macro2::TokenStream {
     // code container
-    let mut fn_setters = quote! {};
-    let mut fn_getters = quote! {};
+    let mut codes = quote! {};
 
     // traverse
-    for field in fields {
-        let field_type = &field.ty;
-        let field_name = field
-            .ident
-            .as_ref()
-            .expect("This filed has no ident. Tuple struct is unsupported for now.");
+    for (idx, field) in data_struct.fields.iter().enumerate() {
+        // build rules from field
+        let rules = Rules::from(field);
 
-        // Parse field attrs
-        let rules = parse_field_attributes(field);
-        let setter_name = rules.gen_setter_name(field_name);
-
-        // Generate setters and getters based on field type
-        match &field_type {
+        // generate code based on field
+        match &field.ty {
             Type::Path(type_path) => {
                 if let Some(last_segment) = type_path.path.segments.last() {
                     match last_segment.ident.to_string().as_str() {
-                        "i8" | "i16" | "i32" | "i64" | "i128" | "isize" | "u8" | "u16" | "u32"
-                        | "u64" | "u128" | "usize" | "bool" | "char" | "unit" | "f32" | "f64" => {
-                            // setters
-                            if rules.gen_setter {
-                                fn_setters.extend(quote! {
-                                    pub fn #setter_name(mut self, x:#field_type) -> Self {
-                                        self.#field_name = x;
-                                        self
-                                    }
-                                });
-                            }
-                            // getters
-                            if rules.gen_getter {
-                                fn_getters.extend(quote! {
-                                    pub fn #field_name(&self) -> #field_type {
-                                        self.#field_name
-                                    }
-                                });
-                            }
-                        }
                         "String" => {
-                            // String -> &str
-
-                            // setters
-                            if rules.gen_setter {
-                                fn_setters.extend(quote! {
-                                    pub fn #setter_name(mut self, x: &str) -> Self {
-                                        self.#field_name = x.to_string();
-                                        self
-                                    }
-                                });
-                            }
-
-                            // getters
-                            if rules.gen_getter {
-                                fn_getters.extend(quote! {
-                                    pub fn #field_name(&self) -> &str {
-                                        &self.#field_name
-                                    }
-                                });
-                            }
+                            generate(
+                                field,
+                                &rules,
+                                idx,
+                                None,
+                                &mut codes,
+                                Fns::Setter(Tys::String),
+                            );
+                            generate(
+                                field,
+                                &rules,
+                                idx,
+                                None,
+                                &mut codes,
+                                Fns::Getter(Tys::String),
+                            );
                         }
+
                         "Vec" => {
                             // Vec<T> -> &[T]
-                            if let syn::PathArguments::AngleBracketed(args) =
-                                &last_segment.arguments
-                            {
+                            if let PathArguments::AngleBracketed(args) = &last_segment.arguments {
                                 if let Some(arg) = args.args.first() {
-                                    if let syn::GenericArgument::Type(ty) = arg {
+                                    if let GenericArgument::Type(ty) = arg {
                                         if let Type::Path(type_path) = &ty {
                                             if let Some(last_segment) =
                                                 type_path.path.segments.last()
@@ -137,119 +95,86 @@ fn build_expanded(st: DeriveInput) -> proc_macro2::TokenStream {
 
                                                 // Vec<String> -> &[&str]
                                                 if ident == "String" {
-                                                    // T => String => &str
-                                                    if rules.gen_setter {
-                                                        fn_setters.extend(quote! {
-                                                        pub fn #setter_name(mut self, x: &[&str]) -> Self {
-                                                            self.#field_name = x.iter().map(|s| s.to_string()).collect();
-                                                            self
-                                                        }
-                                                    });
-                                                    }
+                                                    generate(
+                                                        field,
+                                                        &rules,
+                                                        idx,
+                                                        None,
+                                                        &mut codes,
+                                                        Fns::Setter(Tys::VecString),
+                                                    );
 
                                                     // increment ver
-                                                    if rules.inc_for_vec {
-                                                        let setter_name = Ident::new(
-                                                            &format!("{}_inc", setter_name),
-                                                            Span::call_site(),
-                                                        );
-                                                        // setters
-                                                        if rules.gen_setter {
-                                                            fn_setters.extend(quote! {
-                                                            pub fn #setter_name(mut self, x: &[&str]) -> Self {
-                                                                if self.#field_name.is_empty() {
-                                                                    self.#field_name = x.iter().map(|s| s.to_string()).collect();
-                                                                } else {
-                                                                    let mut x = x.iter().map(|s| s.to_string()).collect();;
-                                                                    self.#field_name.append(&mut x);
-                                                                }
-                                                                self
-                                                            }
-                                                        });
-                                                        }
-                                                    }
+                                                    generate(
+                                                        field,
+                                                        &rules,
+                                                        idx,
+                                                        None,
+                                                        &mut codes,
+                                                        Fns::Setter(Tys::VecStringInc),
+                                                    );
                                                 } else {
-                                                    // setters: override ver
-                                                    if rules.gen_setter {
-                                                        fn_setters.extend(quote! {
-                                                        pub fn #setter_name(mut self, x: &[#arg]) -> Self {
-                                                            self.#field_name = x.to_vec();
-                                                            self
-                                                        }
-                                                    });
-                                                    }
+                                                    // setters
+                                                    generate(
+                                                        field,
+                                                        &rules,
+                                                        idx,
+                                                        Some(arg),
+                                                        &mut codes,
+                                                        Fns::Setter(Tys::Vec),
+                                                    );
 
-                                                    // increment ver
-                                                    if rules.inc_for_vec {
-                                                        let setter_name = Ident::new(
-                                                            &format!("{}_inc", setter_name),
-                                                            Span::call_site(),
-                                                        );
-                                                        // setters
-                                                        if rules.gen_setter {
-                                                            fn_setters.extend(quote! {
-                                                            pub fn #setter_name(mut self, x: &[#arg]) -> Self {
-                                                                if self.#field_name.is_empty() {
-                                                                    self.#field_name = Vec::from(x);
-                                                                } else {
-                                                                    self.#field_name.extend_from_slice(x);
-                                                                }
-                                                                self
-                                                            }
-                                                        });
-                                                        }
-                                                    }
+                                                    // setters inc
+                                                    generate(
+                                                        field,
+                                                        &rules,
+                                                        idx,
+                                                        Some(arg),
+                                                        &mut codes,
+                                                        Fns::Setter(Tys::VecInc),
+                                                    );
                                                 }
 
                                                 // getters: Vec<T> -> &[T]
-                                                if rules.gen_getter {
-                                                    fn_getters.extend(quote! {
-                                                        pub fn #field_name(&self) -> &[#arg] {
-                                                            &self.#field_name
-                                                        }
-                                                    });
-                                                }
+                                                generate(
+                                                    field,
+                                                    &rules,
+                                                    idx,
+                                                    Some(arg),
+                                                    &mut codes,
+                                                    Fns::Getter(Tys::Vec),
+                                                );
                                             }
                                         } else {
                                             // Vec<T> -> &[T]
-                                            // setters: override ver
-                                            if rules.gen_setter {
-                                                fn_setters.extend(quote! {
-                                                pub fn #setter_name(mut self, x: &[#arg]) -> Self {
-                                                    self.#field_name = x.to_vec();
-                                                    self
-                                                }
-                                            });
-                                            }
+                                            // setters
+                                            generate(
+                                                field,
+                                                &rules,
+                                                idx,
+                                                Some(arg),
+                                                &mut codes,
+                                                Fns::Setter(Tys::Vec),
+                                            );
 
-                                            // increment ver
-                                            if rules.inc_for_vec {
-                                                let setter_name = Ident::new(
-                                                    &format!("{}_inc", setter_name),
-                                                    Span::call_site(),
-                                                );
-                                                if rules.gen_setter {
-                                                    fn_setters.extend(quote! {
-                                                    pub fn #setter_name(mut self, x: &[#arg]) -> Self {
-                                                        if self.#field_name.is_empty() {
-                                                            self.#field_name = Vec::from(x);
-                                                        } else {
-                                                            self.#field_name.extend_from_slice(x);
-                                                        }
-                                                        self
-                                                    }
-                                                });
-                                                }
-                                            }
-
+                                            // setters inc
+                                            generate(
+                                                field,
+                                                &rules,
+                                                idx,
+                                                Some(arg),
+                                                &mut codes,
+                                                Fns::Setter(Tys::VecInc),
+                                            );
                                             // getters: Vec<T> -> &[T]
-                                            if rules.gen_getter {
-                                                fn_getters.extend(quote! {
-                                                    pub fn #field_name(&self) -> &[#arg] {
-                                                        &self.#field_name
-                                                    }
-                                                });
-                                            }
+                                            generate(
+                                                field,
+                                                &rules,
+                                                idx,
+                                                Some(arg),
+                                                &mut codes,
+                                                Fns::Getter(Tys::Vec),
+                                            );
                                         }
                                     }
                                 }
@@ -260,12 +185,10 @@ fn build_expanded(st: DeriveInput) -> proc_macro2::TokenStream {
                             // Option<T>
                             // - T => String => &str
                             // - T => Vec<U> => &[U]
-                            //  - U => String => &str
-                            if let syn::PathArguments::AngleBracketed(args) =
-                                &last_segment.arguments
-                            {
+                            //   - U => String => &str
+                            if let PathArguments::AngleBracketed(args) = &last_segment.arguments {
                                 if let Some(arg) = &args.args.first() {
-                                    if let syn::GenericArgument::Type(ty) = arg {
+                                    if let GenericArgument::Type(ty) = arg {
                                         if let Type::Path(type_path) = &ty {
                                             if let Some(last_segment) =
                                                 type_path.path.segments.last()
@@ -273,161 +196,165 @@ fn build_expanded(st: DeriveInput) -> proc_macro2::TokenStream {
                                                 let ident = &last_segment.ident;
                                                 // T => Vec<U> => &[U]
                                                 if ident == "Vec" {
-                                                    if let syn::PathArguments::AngleBracketed(
-                                                        args,
-                                                    ) = &last_segment.arguments
+                                                    if let PathArguments::AngleBracketed(args) =
+                                                        &last_segment.arguments
                                                     {
                                                         // U
                                                         if let Some(arg) = args.args.first() {
-                                                            //  setters
-                                                            if rules.gen_setter {
-                                                                if let GenericArgument::Type(
-                                                                    Type::Path(type_path),
-                                                                ) = arg
+                                                            if let GenericArgument::Type(
+                                                                Type::Path(type_path),
+                                                            ) = arg
+                                                            {
+                                                                if let Some(last_segment) =
+                                                                    type_path.path.segments.last()
                                                                 {
-                                                                    if let Some(last_segment) =
-                                                                        type_path
-                                                                            .path
-                                                                            .segments
-                                                                            .last()
+                                                                    // U => String => &str
+                                                                    // Option<Vec<String>> -> Option<&[&str]>
+                                                                    if last_segment.ident
+                                                                        == "String"
                                                                     {
-                                                                        // U => String => &str
-                                                                        // Option<Vec<String>> -> Option<&[&str]>
-                                                                        if last_segment.ident
-                                                                            == "String"
-                                                                        {
-                                                                            fn_setters.extend(quote! {
-                                                                                pub fn #setter_name(mut self, x: &[&str]) -> Self {
-                                                                                    self.#field_name = Some(x.iter().map(|s| s.to_string()).collect());
-                                                                                    self
-                                                                                }
-                                                                            });
-                                                                        } else {
-                                                                            fn_setters.extend(quote! {
-                                                                                pub fn #setter_name(mut self, x: &[#arg]) -> Self {
-                                                                                    self.#field_name = Some(x.to_vec());
-                                                                                    self
-                                                                                }
-                                                                            });
-                                                                        }
+                                                                        generate(
+                                                                            field,
+                                                                            &rules,
+                                                                            idx,
+                                                                            None,
+                                                                            &mut codes,
+                                                                            Fns::Setter(Tys::OptionVecString),
+                                                                        );
+                                                                    } else {
+                                                                        generate(
+                                                                            field,
+                                                                            &rules,
+                                                                            idx,
+                                                                            Some(arg),
+                                                                            &mut codes,
+                                                                            Fns::Setter(
+                                                                                Tys::OptionVec,
+                                                                            ),
+                                                                        );
                                                                     }
-                                                                } else {
-                                                                    fn_setters.extend(quote! {
-                                                                        pub fn #setter_name(mut self, x: &[#arg]) -> Self {
-                                                                            self.#field_name = Some(x.to_vec());
-                                                                            self
-                                                                        }
-                                                                    });
                                                                 }
+                                                            } else {
+                                                                generate(
+                                                                    field,
+                                                                    &rules,
+                                                                    idx,
+                                                                    Some(arg),
+                                                                    &mut codes,
+                                                                    Fns::Setter(Tys::OptionVec),
+                                                                );
                                                             }
 
                                                             // getters: Option<Vec<T>> -> Option<&[T]>
-                                                            if rules.gen_getter {
-                                                                fn_getters.extend(quote! {
-                                                                    pub fn #field_name(&self) -> Option<&[#arg]> {
-                                                                        self.#field_name.as_deref()
-                                                                    }
-                                                                });
-                                                            }
+                                                            generate(
+                                                                field,
+                                                                &rules,
+                                                                idx,
+                                                                Some(arg),
+                                                                &mut codes,
+                                                                Fns::Getter(Tys::OptionVec),
+                                                            );
                                                         }
                                                     }
                                                 } else if ident == "String" {
                                                     // T => String => &str
-                                                    if rules.gen_setter {
-                                                        fn_setters.extend(quote! {
-                                                        pub fn #setter_name(mut self, x: &str) -> Self {
-                                                            self.#field_name = Some(x.to_string());
-                                                            self
-                                                        }
-                                                    });
-                                                    }
+                                                    generate(
+                                                        field,
+                                                        &rules,
+                                                        idx,
+                                                        Some(arg),
+                                                        &mut codes,
+                                                        Fns::Setter(Tys::OptionString),
+                                                    );
+
                                                     // getters: Option<String> -> Option<&str>
-                                                    if rules.gen_getter {
-                                                        fn_getters.extend(quote! {
-                                                            pub fn #field_name(&self) -> Option<&str> {
-                                                                self.#field_name.as_deref()
-                                                            }
-                                                        });
-                                                    }
+                                                    generate(
+                                                        field,
+                                                        &rules,
+                                                        idx,
+                                                        Some(arg),
+                                                        &mut codes,
+                                                        Fns::Getter(Tys::OptionString),
+                                                    );
                                                 } else {
                                                     // T => T
-                                                    // setters
-                                                    if rules.gen_setter {
-                                                        fn_setters.extend(quote! {
-                                                        pub fn #setter_name(mut self, x: #arg) -> Self {
-                                                            self.#field_name = Some(x);
-                                                            self
-                                                        }
-                                                    });
-                                                    }
-                                                    match ident.to_string().as_str() {
-                                                        "i8" | "i16" | "i32" | "i64" | "i128"
-                                                        | "isize" | "u8" | "u16" | "u32"
-                                                        | "u64" | "u128" | "usize" | "bool"
-                                                        | "char" | "unit" | "f32" | "f64" => {
-                                                            // getters: Option<T> -> Option<T>
-                                                            if rules.gen_getter {
-                                                                fn_getters.extend(quote! {
-                                                                    pub fn #field_name(&self) -> Option<#arg> {
-                                                                        self.#field_name
-                                                                    }
-                                                                });
-                                                            }
-                                                        }
-                                                        _ => {
-                                                            // getters: Option<T> -> Option<&T>
-                                                            // Option<Box<T>>, Option<Option<T>>
-                                                            if rules.gen_getter {
-                                                                fn_getters.extend(quote! {
-                                                                    pub fn #field_name(&self) -> Option<&#arg> {
-                                                                        self.#field_name.as_ref()
-                                                                    }
-                                                                });
-                                                            }
-                                                        }
+                                                    generate(
+                                                        field,
+                                                        &rules,
+                                                        idx,
+                                                        Some(arg),
+                                                        &mut codes,
+                                                        Fns::Setter(Tys::Option),
+                                                    );
+
+                                                    if PRIMITIVE_TYPES
+                                                        .contains(&ident.to_string().as_str())
+                                                    {
+                                                        // getters: Option<T> -> Option<T>
+                                                        generate(
+                                                            field,
+                                                            &rules,
+                                                            idx,
+                                                            Some(arg),
+                                                            &mut codes,
+                                                            Fns::Getter(Tys::Option),
+                                                        );
+                                                    } else {
+                                                        // getters: Option<T> -> Option<&T>
+                                                        // Option<Box<T>>, Option<Option<T>>
+                                                        generate(
+                                                            field,
+                                                            &rules,
+                                                            idx,
+                                                            Some(arg),
+                                                            &mut codes,
+                                                            Fns::Getter(Tys::OptionAsRef),
+                                                        );
                                                     }
                                                 }
                                             }
                                         } else {
                                             //  others: Option<(u8, i8)>, Option<&'a str>,
-                                            if let syn::PathArguments::AngleBracketed(args) =
+                                            if let PathArguments::AngleBracketed(args) =
                                                 &last_segment.arguments
                                             {
                                                 if let Some(arg) = args.args.first() {
                                                     // setters
-                                                    if rules.gen_setter {
-                                                        fn_setters.extend(quote! {
-                                                        pub fn #setter_name(mut self, x: #arg) -> Self {
-                                                            self.#field_name = Some(x);
-                                                            self
-                                                        }
-                                                    });
-                                                    }
+                                                    generate(
+                                                        field,
+                                                        &rules,
+                                                        idx,
+                                                        Some(arg),
+                                                        &mut codes,
+                                                        Fns::Setter(Tys::Option),
+                                                    );
 
                                                     // getters
-                                                    if let syn::GenericArgument::Type(ty) = arg {
+                                                    if let GenericArgument::Type(ty) = arg {
                                                         match ty {
                                                             Type::Reference(_) => {
                                                                 // getters: Option<T> -> Option<T>
                                                                 // Option<&'a str>
-                                                                if rules.gen_getter {
-                                                                    fn_getters.extend(quote! {
-                                                                        pub fn #field_name(&self) -> Option<#arg> {
-                                                                            self.#field_name
-                                                                        }
-                                                                    });
-                                                                }
+                                                                generate(
+                                                                    field,
+                                                                    &rules,
+                                                                    idx,
+                                                                    Some(arg),
+                                                                    &mut codes,
+                                                                    Fns::Getter(Tys::Option),
+                                                                );
                                                             }
                                                             _ => {
                                                                 // getters: Option<T> -> Option<&T>
                                                                 // Option<(u8, i8)>
-                                                                if rules.gen_getter {
-                                                                    fn_getters.extend(quote! {
-                                                                        pub fn #field_name(&self) -> Option<&#arg> {
-                                                                            self.#field_name.as_ref()
-                                                                        }
-                                                                    });
-                                                                }
+                                                                generate(
+                                                                    field,
+                                                                    &rules,
+                                                                    idx,
+                                                                    Some(arg),
+                                                                    &mut codes,
+                                                                    Fns::Getter(Tys::OptionAsRef),
+                                                                );
                                                             }
                                                         }
                                                     }
@@ -438,148 +365,278 @@ fn build_expanded(st: DeriveInput) -> proc_macro2::TokenStream {
                                 }
                             }
                         }
-                        _ => {
-                            // setters
-                            if rules.gen_setter {
-                                fn_setters.extend(quote! {
-                                    pub fn #setter_name(mut self, x:#field_type) -> Self {
-                                        self.#field_name = x;
-                                        self
-                                    }
-                                });
-                            }
-
-                            // getters: HashMap -> &HashMap
-                            if rules.gen_getter {
-                                fn_getters.extend(quote! {
-                                    pub fn #field_name(&self) -> &#field_type {
-                                        &self.#field_name
-                                    }
-                                });
+                        xxx => {
+                            generate(
+                                field,
+                                &rules,
+                                idx,
+                                None,
+                                &mut codes,
+                                Fns::Setter(Tys::Basic),
+                            );
+                            if PRIMITIVE_TYPES.contains(&xxx) {
+                                generate(
+                                    field,
+                                    &rules,
+                                    idx,
+                                    None,
+                                    &mut codes,
+                                    Fns::Getter(Tys::Basic),
+                                );
+                            } else {
+                                generate(
+                                    field,
+                                    &rules,
+                                    idx,
+                                    None,
+                                    &mut codes,
+                                    Fns::Getter(Tys::Ref),
+                                );
                             }
                         }
                     }
                 }
             }
-            Type::Reference(_) => {
-                // A reference type: &'a T or &'a mut T.
-                // setters
-                if rules.gen_setter {
-                    fn_setters.extend(quote! {
-                        pub fn #setter_name(mut self, x: #field_type) -> Self {
-                            self.#field_name = x;
-                            self
-                        }
-                    });
-                }
-                // getters
-                if rules.gen_getter {
-                    fn_getters.extend(quote! {
-                        pub fn #field_name(&self) -> #field_type {
-                            self.#field_name
-                        }
-                    });
-                }
-            }
-            Type::Array(_) | Type::Tuple(_) => {
-                // A fixed size array type: [T; n].
-                // A tuple type: (A, B, C, String).
-                // setters
-                if rules.gen_setter {
-                    fn_setters.extend(quote! {
-                        pub fn #setter_name(mut self, x: #field_type) -> Self {
-                            self.#field_name = x;
-                            self
-                        }
-                    });
-                }
-                // getters
-                if rules.gen_getter {
-                    fn_getters.extend(quote! {
-                        pub fn #field_name(&self) -> &#field_type {
-                            &self.#field_name
-                        }
-                    });
+            ty => {
+                // setter
+                generate(
+                    field,
+                    &rules,
+                    idx,
+                    None,
+                    &mut codes,
+                    Fns::Setter(Tys::Basic),
+                );
+
+                // getter
+                match ty {
+                    Type::Reference(_) => {
+                        // &'a T or &'a mut T
+                        generate(
+                            field,
+                            &rules,
+                            idx,
+                            None,
+                            &mut codes,
+                            Fns::Getter(Tys::Basic),
+                        );
+                    }
+                    Type::Array(_) | Type::Tuple(_) => {
+                        // array [T; n] and tuple (A, B, C, String)
+                        generate(field, &rules, idx, None, &mut codes, Fns::Getter(Tys::Ref));
+                    }
+                    _ => {
+                        // TODO: others
+                        generate(field, &rules, idx, None, &mut codes, Fns::Getter(Tys::Ref));
+                    }
                 }
             }
-            _ => eprintln!("Unsupported field type: {:?}", field_type),
         }
     }
 
-    // code
+    // token stream
     quote! {
-        impl #impl_generics #struct_name #ty_generics #where_clause {
-            #fn_setters
-            #fn_getters
-        }
+        #codes
     }
 }
 
-// Function to parse boolean or string from attributes.
-fn parse_bool_or_str(value: &Expr) -> bool {
-    match value {
-        Expr::Lit(lit) => match &lit.lit {
-            Lit::Bool(x) => x.value,
-            Lit::Str(x) => matches!(
-                x.value().to_lowercase().as_str(),
-                "yes" | "true" | "t" | "y"
-            ),
-            _ => false,
-        },
-        _ => false,
-    }
-}
+fn generate(
+    field: &Field,
+    rules: &Rules,
+    idx: usize,
+    arg: Option<&GenericArgument>,
+    codes: &mut proc_macro2::TokenStream,
+    fn_type: Fns,
+) {
+    // setter_name & getter_name
+    let (setter_name, getter_name) = rules.generate_setter_getter_names(field, idx); // (move inside????)
 
-fn parse_field_attributes(field: &syn::Field) -> Rules {
-    let mut rules = Rules::default();
-    if let Some(attr) = &field.attrs.first() {
-        if attr.path().is_ident(ARGS) {
-            let nested = match attr.parse_args_with(Punctuated::<Meta, Token![,]>::parse_terminated)
-            {
-                Ok(x) => x,
-                Err(err) => panic!("{}", err),
-            };
-            for meta in &nested {
-                match meta {
-                    Meta::NameValue(name_value) => {
-                        match name_value
-                            .path
-                            .get_ident()
-                            .map(|i| i.to_string())
-                            .as_deref()
-                        {
-                            Some(GETTER) => rules.gen_getter = parse_bool_or_str(&name_value.value),
-                            Some(SETTER) => rules.gen_setter = parse_bool_or_str(&name_value.value),
-                            Some(ALIAS) => {
-                                if let Expr::Lit(lit) = &name_value.value {
-                                    if let Lit::Str(x) = &lit.lit {
-                                        rules.alias =
-                                            Some(Ident::new(&x.value(), Span::call_site()));
-                                    }
-                                }
-                            }
-                            Some(PREFIX) => {
-                                if let Expr::Lit(lit) = &name_value.value {
-                                    if let Lit::Str(x) = &lit.lit {
-                                        rules.prefix_setter = x.value();
-                                    }
-                                }
-                            }
-                            Some(INC_FOR_VEC) => {
-                                if let Expr::Lit(lit) = &name_value.value {
-                                    if let Lit::Bool(x) = &lit.lit {
-                                        rules.inc_for_vec = x.value();
-                                    }
-                                }
-                            }
-                            _ => {}
+    // attrs
+    let field_type = &field.ty;
+    let field_name = field.ident.as_ref();
+    let field_index = Index::from(idx);
+    let field_access = field_name.map_or_else(|| quote! { #field_index }, |name| quote! { #name });
+
+    // token stream
+    let code = match fn_type {
+        Fns::Setter(ty) => {
+            if !rules.gen_setter {
+                return;
+            }
+            match ty {
+                Tys::Basic => {
+                    quote! {
+                        pub fn #setter_name(mut self, x: #field_type) -> Self {
+                            self.#field_access = x;
+                            self
                         }
                     }
-                    Meta::Path(_) | Meta::List(_) => continue,
                 }
+                Tys::String => {
+                    quote! {
+                        pub fn #setter_name(mut self, x: &str) -> Self {
+                            self.#field_access = x.to_string();
+                            self
+                        }
+                    }
+                }
+                Tys::Vec => {
+                    let arg = arg.expect("Vec setter requires a generic argument");
+                    quote! {
+                        pub fn #setter_name(mut self, x: &[#arg]) -> Self {
+                            self.#field_access = x.to_vec();
+                            self
+                        }
+                    }
+                }
+                Tys::VecInc if rules.inc_for_vec => {
+                    let arg = arg.expect("VecInc setter requires a generic argument");
+                    let setter_name = Ident::new(
+                        &format!("{}_{}", setter_name, INC_FOR_VEC),
+                        Span::call_site(),
+                    );
+                    quote! {
+                        pub fn #setter_name(mut self, x: &[#arg]) -> Self {
+                            if self.#field_access.is_empty() {
+                                self.#field_access = Vec::from(x);
+                            } else {
+                                self.#field_access.extend_from_slice(x);
+                            }
+                            self
+                        }
+                    }
+                }
+                Tys::VecString => {
+                    quote! {
+                        pub fn #setter_name(mut self, x: &[&str]) -> Self {
+                            self.#field_access = x.iter().map(|s| s.to_string()).collect();
+                            self
+                        }
+                    }
+                }
+                Tys::VecStringInc if rules.inc_for_vec => {
+                    let setter_name = Ident::new(
+                        &format!("{}_{}", setter_name, INC_FOR_VEC),
+                        Span::call_site(),
+                    );
+                    quote! {
+                        pub fn #setter_name(mut self, x: &[&str]) -> Self {
+                            if self.#field_access.is_empty() {
+                                self.#field_access = x.iter().map(|s| s.to_string()).collect();
+                            } else {
+                                let mut x = x.iter().map(|s| s.to_string()).collect::<Vec<_>>();
+                                self.#field_access.append(&mut x);
+                            }
+                            self
+                        }
+                    }
+                }
+                Tys::Option => {
+                    quote! {
+                        pub fn #setter_name(mut self, x: #arg) -> Self {
+                            self.#field_access = Some(x);
+                            self
+                        }
+                    }
+                }
+                Tys::OptionVec => {
+                    let arg = arg.expect("OptionVec setter requires a generic argument");
+                    quote! {
+                        pub fn #setter_name(mut self, x: &[#arg]) -> Self {
+                            self.#field_access = Some(x.to_vec());
+                            self
+                        }
+                    }
+                }
+                Tys::OptionVecString => {
+                    quote! {
+                        pub fn #setter_name(mut self, x: &[&str]) -> Self {
+                            self.#field_access = Some(x.iter().map(|s| s.to_string()).collect());
+                            self
+                        }
+                    }
+                }
+                Tys::OptionString => {
+                    quote! {
+                        pub fn #setter_name(mut self, x: &str) -> Self {
+                            self.#field_access = Some(x.to_string());
+                            self
+                        }
+                    }
+                }
+                _ => quote! {},
             }
         }
-    }
+        Fns::Getter(ty) => {
+            if !rules.gen_getter {
+                return;
+            }
+            match ty {
+                Tys::Basic => {
+                    quote! {
+                        pub fn #getter_name(&self) -> #field_type {
+                            self.#field_access
+                        }
+                    }
+                }
+                Tys::Ref => {
+                    quote! {
+                        pub fn #getter_name(&self) -> &#field_type {
+                            &self.#field_access
+                        }
+                    }
+                }
+                Tys::String => {
+                    quote! {
+                        pub fn #getter_name(&self) -> &str {
+                            &self.#field_access
+                        }
+                    }
+                }
+                Tys::Vec => {
+                    let arg = arg.expect("Vec getter requires a generic argument");
+                    quote! {
+                        pub fn #getter_name(&self) -> &[#arg] {
+                            &self.#field_access
+                        }
+                    }
+                }
+                Tys::Option => {
+                    let arg = arg.expect("Option getter requires a generic argument");
+                    quote! {
+                        pub fn #getter_name(&self) -> Option<#arg> {
+                            self.#field_access
+                        }
+                    }
+                }
+                Tys::OptionAsRef => {
+                    let arg = arg.expect("OptionAsRef getter requires a generic argument");
+                    quote! {
+                        pub fn #getter_name(&self) -> Option<&#arg> {
+                            self.#field_access.as_ref()
+                        }
+                    }
+                }
+                Tys::OptionString => {
+                    quote! {
+                        pub fn #getter_name(&self) -> Option<&str> {
+                            self.#field_access.as_deref()
+                        }
+                    }
+                }
+                Tys::OptionVec => {
+                    let arg = arg.expect("OptionVec getter requires a generic argument");
+                    quote! {
+                        pub fn #getter_name(&self) -> Option<&[#arg]> {
+                            self.#field_access.as_deref()
+                        }
+                    }
+                }
+                _ => quote! {},
+            }
+        }
+    };
 
-    rules
+    // append
+    codes.extend(code);
 }

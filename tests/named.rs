@@ -97,6 +97,7 @@ pub struct Entity<'a, A: std::fmt::Debug, B> {
     opt_string: Option<String>,
     opt_vec_str: Option<Vec<&'a str>>,
     opt_vec_string: Option<Vec<String>>,
+    opt_vec_vec_string: Option<Vec<Vec<String>>>,
     opt_opt_usize: Option<Option<usize>>,
 
     // Reults
@@ -164,6 +165,7 @@ impl<'a, A: Default + std::fmt::Debug, B: Default> Default for Entity<'a, A, B> 
             opt_vec_str: None,
             opt_string: None,
             opt_vec_string: None,
+            opt_vec_vec_string: None,
             opt_opt_usize: None,
             result: Ok(0),
             _marker: PhantomData,
@@ -172,7 +174,7 @@ impl<'a, A: Default + std::fmt::Debug, B: Default> Default for Entity<'a, A, B> 
 }
 
 #[test]
-fn setters_and_getters() {
+fn all() {
     let entity: Entity<'_, u8, String> = Entity::default()
         .with_unit(())
         .with_char('c')
@@ -230,6 +232,7 @@ fn setters_and_getters() {
         .with_opt_vec_str(&["opt_str1", "opt_str2"])
         .with_opt_string("optional_string")
         .with_opt_vec_string(&["optional"])
+        .with_opt_vec_vec_string(&[vec!["optional".to_string()]])
         .with_opt_opt_usize(Some(2))
         .with_result(Ok(1))
         .with__marker(PhantomData);
@@ -359,6 +362,14 @@ fn setters_and_getters() {
     assert_eq!(entity.opt_vec_str(), Some(&["opt_str1", "opt_str2"][..]));
     assert_eq!(entity.opt_vec_string, Some(vec!["optional".to_string()]));
     assert_eq!(entity.opt_vec_string(), Some(&["optional".to_string()][..]));
+    assert_eq!(
+        entity.opt_vec_vec_string,
+        Some(vec![vec!["optional".to_string()]])
+    );
+    assert_eq!(
+        entity.opt_vec_vec_string(),
+        Some(&[vec!["optional".to_string()]][..])
+    );
     assert_eq!(entity.opt_opt_usize, Some(Some(2)));
     assert_eq!(entity.opt_opt_usize(), Some(&Some(2)));
     assert_eq!(entity.result, Ok(1));
