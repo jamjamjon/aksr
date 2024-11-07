@@ -2,16 +2,12 @@ use aksr::Builder;
 
 #[derive(Builder, Debug, Default)]
 struct Rect {
+    #[args(getter = false)]
     x: f32,
     y: f32,
     w: f32,
     h: f32,
-    #[args(
-        alias = "attributes",
-        setter_prefix = "set",
-        inc = true,
-        getter = false
-    )]
+    #[args(alias = "attributes", setter_prefix = "set", inc = true)]
     attrs: Vec<String>,
 }
 
@@ -26,10 +22,11 @@ fn main() {
         .set_attributes_inc(&["P"]);
 
     println!("rect: {:?}", rect);
-    println!("x: {}", rect.x());
+    println!("x: {}", rect.x);
     println!("y: {}", rect.y());
     println!("w: {}", rect.w());
     println!("h: {}", rect.h());
-    println!("attrs: {:?}", rect.attrs);
+    println!("attrs: {:?}", rect.attributes());
+    // println!("x: {}", rect.x());  // no method named `x()`, getter disabled
     // println!("attrs: {:?}", rect.attrs()); // no method named `attrs`
 }

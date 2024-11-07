@@ -21,8 +21,8 @@ impl Default for Rules {
         Self {
             alias: None,
             inc_for_vec: false,
-            prefix_setter: SETTER_PREFIX_DEFAULT.into(),
-            prefix_getter: GETTER_PREFIX_DEFAULT.into(),
+            prefix_setter: SETTER_PREFIX_DEFAULT.into(), // with, for all struct
+            prefix_getter: GETTER_PREFIX_DEFAULT.into(), // nth, for unnamed struct
             gen_getter: true,
             gen_setter: true,
         }
@@ -144,7 +144,13 @@ impl Rules {
                     Some(alias) => format!("{}_{}", self.prefix_setter, alias),
                 };
                 let setter_name = Ident::new(&setter_name, Span::call_site());
-                (setter_name, ident.clone())
+
+                let getter_name = match &self.alias {
+                    None => format!("{}", ident),
+                    Some(alias) => format!("{}", alias),
+                };
+                let getter_name = Ident::new(&getter_name, Span::call_site());
+                (setter_name, getter_name)
             }
         }
     }
