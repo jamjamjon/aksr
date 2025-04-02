@@ -22,8 +22,8 @@ struct Rect {
     w: f32,
     h: f32,
     #[args(
-        alias = "attributes",
-        setter_prefix = "set",
+        aka = "attributes",
+        set_pre = "set",
         inc = true,
         getter = false
     )]
@@ -66,7 +66,7 @@ struct Rect {
     y: f32,
     w: f32,
     h: f32,
-    #[args(alias = "attributes", setter_prefix = "set", inc = true, getter = false)]
+    #[args(aka = "attributes", set_pre = "set", inc = true, getter = false)]
     attrs: Vec<String>,
 }
 impl Rect {

@@ -17,8 +17,8 @@
 //!     w: f32,
 //!     h: f32,
 //!     #[args(
-//!         alias = "attributes",
-//!         setter_prefix = "set",
+//!         aka = "attributes",
+//!         set_pre = "set",
 //!         inc = true,
 //!         getter = false
 //!     )]
@@ -55,8 +55,8 @@
 //!     u8,
 //!     u8,
 //!     u8,
-//!     #[args(alias = "alpha")] f32,
-//!     #[args(inc = true, getter_prefix = "get", setter_prefix = "set")] Vec<&'a str>,
+//!     #[args(aka = "alpha")] f32,
+//!     #[args(inc = true, get_pre = "get", set_pre = "set")] Vec<&'a str>,
 //! );
 //!
 //! let color = Color::default()
@@ -86,22 +86,45 @@ use syn::{
     Type,
 };
 
-mod misc;
-use misc::{Fns, Rules, Tys};
+mod rules;
+use rules::Rules;
 
 const ARGS: &str = "args";
-const ALIAS: &str = "alias";
+const ALLOW: &str = "allow";
+const EXCEPT: &str = "except";
+const ALIAS: &str = "aka";
 const GETTER: &str = "getter";
 const SETTER: &str = "setter";
-const SETTER_PREFIX: &str = "setter_prefix";
-const GETTER_PREFIX: &str = "getter_prefix";
+const SKIP: &str = "skip";
 const INC_FOR_VEC: &str = "inc";
+const SETTER_PREFIX: &str = "set_pre"; // TODO
+const GETTER_PREFIX: &str = "get_pre"; // TODO
 const SETTER_PREFIX_DEFAULT: &str = "with";
 const GETTER_PREFIX_DEFAULT: &str = "nth";
 const PRIMITIVE_TYPES: &[&str] = &[
     "i8", "i16", "i32", "i64", "i128", "isize", "u8", "u16", "u32", "u64", "u128", "usize", "bool",
     "char", "unit", "f32", "f64",
 ];
+
+pub(crate) enum Fns {
+    Setter(Tys),
+    Getter(Tys),
+}
+
+pub(crate) enum Tys {
+    Basic,
+    Ref,
+    String,
+    Vec,
+    VecInc,
+    VecString,
+    VecStringInc,
+    Option,
+    OptionAsRef,
+    OptionVec,
+    OptionString,
+    OptionVecString,
+}
 
 #[proc_macro_derive(Builder, attributes(args))]
 pub fn derive(x: TokenStream) -> TokenStream {
@@ -111,10 +134,10 @@ pub fn derive(x: TokenStream) -> TokenStream {
 }
 
 fn build_expanded(st: DeriveInput) -> proc_macro2::TokenStream {
-    // generate code
+    // generate
     let code = match &st.data {
         Data::Struct(data) => generate_from_struct(data),
-        Data::Enum(_) | Data::Union(_) => panic!("Builder(aksr) can only be derived for struct"),
+        Data::Enum(_) | Data::Union(_) => panic!("`aksr` Builder can only be derived for struct"),
     };
 
     // attrs
@@ -546,6 +569,15 @@ fn generate(
             match ty {
                 Tys::Basic => {
                     quote! {
+                        #[doc = concat!(" Sets the value of the `", stringify!(#field_access), "` field.")]
+                        #[doc = " "]
+                        #[doc = " # Arguments"]
+                        #[doc = " "]
+                        #[doc = " * `x` - The new value to be assigned to the field."]
+                        #[doc = " "]
+                        #[doc = " # Returns"]
+                        #[doc = " "]
+                        #[doc = " Returns `Self` to allow method chaining."]
                         pub fn #setter_name(mut self, x: #field_type) -> Self {
                             self.#field_access = x;
                             self
@@ -554,6 +586,15 @@ fn generate(
                 }
                 Tys::String => {
                     quote! {
+                        #[doc = concat!(" Sets the value of the `", stringify!(#field_access), "` field from a string slice.")]
+                        #[doc = " "]
+                        #[doc = " # Arguments"]
+                        #[doc = " "]
+                        #[doc = " * `x` - A string slice that will be converted to a `String`."]
+                        #[doc = " "]
+                        #[doc = " # Returns"]
+                        #[doc = " "]
+                        #[doc = " Returns `Self` to allow method chaining."]
                         pub fn #setter_name(mut self, x: &str) -> Self {
                             self.#field_access = x.to_string();
                             self
@@ -563,6 +604,15 @@ fn generate(
                 Tys::Vec => {
                     let arg = arg.expect("Vec setter requires a generic argument");
                     quote! {
+                        #[doc = concat!(" Sets the value of the `", stringify!(#field_access), "` field from a slice.")]
+                        #[doc = " "]
+                        #[doc = " # Arguments"]
+                        #[doc = " "]
+                        #[doc = " * `x` - A slice of elements to be converted into a vector."]
+                        #[doc = " "]
+                        #[doc = " # Returns"]
+                        #[doc = " "]
+                        #[doc = " Returns `Self` to allow method chaining."]
                         pub fn #setter_name(mut self, x: &[#arg]) -> Self {
                             self.#field_access = x.to_vec();
                             self
@@ -576,6 +626,15 @@ fn generate(
                         Span::call_site(),
                     );
                     quote! {
+                        #[doc = concat!(" Appends values to the `", stringify!(#field_access), "` field.")]
+                        #[doc = " "]
+                        #[doc = " # Arguments"]
+                        #[doc = " "]
+                        #[doc = " * `x` - A slice of elements to be appended to the vector."]
+                        #[doc = " "]
+                        #[doc = " # Returns"]
+                        #[doc = " "]
+                        #[doc = " Returns `Self` to allow method chaining."]
                         pub fn #setter_name(mut self, x: &[#arg]) -> Self {
                             if self.#field_access.is_empty() {
                                 self.#field_access = Vec::from(x);
@@ -588,6 +647,15 @@ fn generate(
                 }
                 Tys::VecString => {
                     quote! {
+                        #[doc = concat!(" Sets the value of the `", stringify!(#field_access), "` field from a slice of string slices.")]
+                        #[doc = " "]
+                        #[doc = " # Arguments"]
+                        #[doc = " "]
+                        #[doc = " * `x` - A slice of string slices to be converted into a vector of `String`."]
+                        #[doc = " "]
+                        #[doc = " # Returns"]
+                        #[doc = " "]
+                        #[doc = " Returns `Self` to allow method chaining."]
                         pub fn #setter_name(mut self, x: &[&str]) -> Self {
                             self.#field_access = x.iter().map(|s| s.to_string()).collect();
                             self
@@ -600,6 +668,15 @@ fn generate(
                         Span::call_site(),
                     );
                     quote! {
+                        #[doc = concat!(" Appends string values to the `", stringify!(#field_access), "` field.")]
+                        #[doc = " "]
+                        #[doc = " # Arguments"]
+                        #[doc = " "]
+                        #[doc = " * `x` - A slice of string slices to be appended as `String` values."]
+                        #[doc = " "]
+                        #[doc = " # Returns"]
+                        #[doc = " "]
+                        #[doc = " Returns `Self` to allow method chaining."]
                         pub fn #setter_name(mut self, x: &[&str]) -> Self {
                             if self.#field_access.is_empty() {
                                 self.#field_access = x.iter().map(|s| s.to_string()).collect();
@@ -613,6 +690,15 @@ fn generate(
                 }
                 Tys::Option => {
                     quote! {
+                        #[doc = concat!(" Sets the value of the optional `", stringify!(#field_access), "` field.")]
+                        #[doc = " "]
+                        #[doc = " # Arguments"]
+                        #[doc = " "]
+                        #[doc = " * `x` - The value to be wrapped in `Some` and assigned to the field."]
+                        #[doc = " "]
+                        #[doc = " # Returns"]
+                        #[doc = " "]
+                        #[doc = " Returns `Self` to allow method chaining."]
                         pub fn #setter_name(mut self, x: #arg) -> Self {
                             self.#field_access = Some(x);
                             self
@@ -622,6 +708,15 @@ fn generate(
                 Tys::OptionVec => {
                     let arg = arg.expect("OptionVec setter requires a generic argument");
                     quote! {
+                        #[doc = concat!(" Sets the value of the optional `", stringify!(#field_access), "` field from a slice.")]
+                        #[doc = " "]
+                        #[doc = " # Arguments"]
+                        #[doc = " "]
+                        #[doc = " * `x` - A slice of elements to be converted into a vector and wrapped in `Some`."]
+                        #[doc = " "]
+                        #[doc = " # Returns"]
+                        #[doc = " "]
+                        #[doc = " Returns `Self` to allow method chaining."]
                         pub fn #setter_name(mut self, x: &[#arg]) -> Self {
                             self.#field_access = Some(x.to_vec());
                             self
@@ -630,6 +725,15 @@ fn generate(
                 }
                 Tys::OptionVecString => {
                     quote! {
+                        #[doc = concat!(" Sets the value of the optional `", stringify!(#field_access), "` field from a slice of string slices.")]
+                        #[doc = " "]
+                        #[doc = " # Arguments"]
+                        #[doc = " "]
+                        #[doc = " * `x` - A slice of string slices to be converted into a vector of `String` and wrapped in `Some`."]
+                        #[doc = " "]
+                        #[doc = " # Returns"]
+                        #[doc = " "]
+                        #[doc = " Returns `Self` to allow method chaining."]
                         pub fn #setter_name(mut self, x: &[&str]) -> Self {
                             self.#field_access = Some(x.iter().map(|s| s.to_string()).collect());
                             self
@@ -638,6 +742,15 @@ fn generate(
                 }
                 Tys::OptionString => {
                     quote! {
+                        #[doc = concat!(" Sets the value of the optional `", stringify!(#field_access), "` field from a string slice.")]
+                        #[doc = " "]
+                        #[doc = " # Arguments"]
+                        #[doc = " "]
+                        #[doc = " * `x` - A string slice to be converted into a `String` and wrapped in `Some`."]
+                        #[doc = " "]
+                        #[doc = " # Returns"]
+                        #[doc = " "]
+                        #[doc = " Returns `Self` to allow method chaining."]
                         pub fn #setter_name(mut self, x: &str) -> Self {
                             self.#field_access = Some(x.to_string());
                             self
@@ -654,6 +767,7 @@ fn generate(
             match ty {
                 Tys::Basic => {
                     quote! {
+                        #[doc = concat!(" Returns the value of the `", stringify!(#field_access), "` field.")]
                         pub fn #getter_name(&self) -> #field_type {
                             self.#field_access
                         }
@@ -661,6 +775,7 @@ fn generate(
                 }
                 Tys::Ref => {
                     quote! {
+                        #[doc = concat!(" Returns a reference to the `", stringify!(#field_access), "` field.")]
                         pub fn #getter_name(&self) -> &#field_type {
                             &self.#field_access
                         }
@@ -668,6 +783,7 @@ fn generate(
                 }
                 Tys::String => {
                     quote! {
+                        #[doc = concat!(" Returns a string slice of the `", stringify!(#field_access), "` field.")]
                         pub fn #getter_name(&self) -> &str {
                             &self.#field_access
                         }
@@ -676,6 +792,7 @@ fn generate(
                 Tys::Vec => {
                     let arg = arg.expect("Vec getter requires a generic argument");
                     quote! {
+                        #[doc = concat!(" Returns a slice of the `", stringify!(#field_access), "` field.")]
                         pub fn #getter_name(&self) -> &[#arg] {
                             &self.#field_access
                         }
@@ -684,6 +801,7 @@ fn generate(
                 Tys::Option => {
                     let arg = arg.expect("Option getter requires a generic argument");
                     quote! {
+                        #[doc = concat!(" Returns the value of the optional `", stringify!(#field_access), "` field.")]
                         pub fn #getter_name(&self) -> Option<#arg> {
                             self.#field_access
                         }
@@ -692,6 +810,7 @@ fn generate(
                 Tys::OptionAsRef => {
                     let arg = arg.expect("OptionAsRef getter requires a generic argument");
                     quote! {
+                        #[doc = concat!(" Returns an optional reference to the `", stringify!(#field_access), "` field.")]
                         pub fn #getter_name(&self) -> Option<&#arg> {
                             self.#field_access.as_ref()
                         }
@@ -699,6 +818,7 @@ fn generate(
                 }
                 Tys::OptionString => {
                     quote! {
+                        #[doc = concat!(" Returns an optional string slice of the `", stringify!(#field_access), "` field.")]
                         pub fn #getter_name(&self) -> Option<&str> {
                             self.#field_access.as_deref()
                         }
@@ -707,6 +827,7 @@ fn generate(
                 Tys::OptionVec => {
                     let arg = arg.expect("OptionVec getter requires a generic argument");
                     quote! {
+                        #[doc = concat!(" Returns an optional slice of the `", stringify!(#field_access), "` field.")]
                         pub fn #getter_name(&self) -> Option<&[#arg]> {
                             self.#field_access.as_deref()
                         }

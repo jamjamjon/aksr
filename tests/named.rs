@@ -24,8 +24,11 @@ pub enum Y {
 pub struct Entity<'a, A: std::fmt::Debug, B> {
     // primitive
     unit: (),
+    #[args(skip = false)]
     char: char,
+    #[args(allow(getter, setter))]
     bool: bool,
+    #[args(aka = "float64")]
     f64: f64,
     f32: f32,
     i8: i8,
@@ -107,7 +110,7 @@ pub struct Entity<'a, A: std::fmt::Debug, B> {
     _marker: PhantomData<&'a ()>,
 }
 
-impl<'a, A: Default + std::fmt::Debug, B: Default> Default for Entity<'a, A, B> {
+impl<A: Default + std::fmt::Debug, B: Default> Default for Entity<'_, A, B> {
     fn default() -> Self {
         Entity {
             unit: (),
@@ -179,7 +182,7 @@ fn all() {
         .with_unit(())
         .with_char('c')
         .with_bool(true)
-        .with_f64(64.)
+        .with_float64(64.)
         .with_f32(32.)
         .with_i8(8)
         .with_i16(16)
@@ -243,7 +246,7 @@ fn all() {
     assert!(entity.bool);
     assert!(entity.bool());
     assert_eq!(entity.f64, 64.0);
-    assert_eq!(entity.f64(), 64.0);
+    assert_eq!(entity.float64(), 64.0);
     assert_eq!(entity.f32, 32.0);
     assert_eq!(entity.f32(), 32.0);
     assert_eq!(entity.i8, 8);

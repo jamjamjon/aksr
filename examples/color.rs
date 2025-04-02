@@ -5,8 +5,8 @@ struct Color<'a>(
     u8,
     u8,
     u8,
-    #[args(alias = "alpha")] f32,
-    #[args(inc = true, getter_prefix = "get", setter_prefix = "set")] Vec<&'a str>,
+    #[args(aka = "alpha")] f32,
+    #[args(inc = true, get_pre = "get", set_pre = "set")] Vec<&'a str>,
 );
 
 fn main() {
