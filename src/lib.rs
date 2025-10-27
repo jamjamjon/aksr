@@ -1,81 +1,20 @@
 //! # aksr
 //!
-//! `aksr` is a Rust derive macro designed to simplify struct management by automatically generating getter and setter methods for both named and tuple structs.
+//! A Rust derive macro that automatically generates **[Builder Lite](https://matklad.github.io/2022/05/29/builder-lite.html)** pattern methods for structs.
 //!
+//! The struct itself acts as the builder, eliminating the need for a separate builder type. This is especially useful for rapidly evolving application code.
 //!
-//! ## Example: Named Struct
+//! **Requirements:** Struct must implement `Default` or have a `new()` method.
 //!
-//! This example demonstrates the use of `aksr` with a named struct, `Rect`. The `attrs` field is set with an alias, a custom setter prefix, and the ability to increment values, while disabling the generation of a getter method for `attrs`.
+//! ## Examples
 //!
-//! ```rust
-//! use aksr::Builder;
+//! See the [`examples`](https://github.com/jamjamjon/aksr/tree/main/examples) directory:
+//! - [`examples/rect.rs`](examples/rect.rs) - Named struct with all features
+//! - [`examples/color.rs`](examples/color.rs) - Tuple struct with all features
 //!
-//! #[derive(Builder, Debug, Default)]
-//! struct Rect {
-//!     x: f32,
-//!     y: f32,
-//!     w: f32,
-//!     h: f32,
-//!     #[args(
-//!         aka = "attributes",
-//!         set_pre = "set",
-//!         inc = true,
-//!         getter = false
-//!     )]
-//!     attrs: Vec<String>,
-//! }
+//! Run examples with `cargo run --example rect` or `cargo run --example color`.
 //!
-//! let rect = Rect::default()
-//!     .with_x(0.0)
-//!     .with_y(0.0)
-//!     .with_w(10.0)
-//!     .with_h(5.0)
-//!     .set_attributes(&["A", "X", "Z"])
-//!     .set_attributes_inc(&["O"])
-//!     .set_attributes_inc(&["P"]);
-//!
-//! println!("rect: {:?}", rect);
-//! println!("x: {}", rect.x());
-//! println!("y: {}", rect.y());
-//! println!("w: {}", rect.w());
-//! println!("h: {}", rect.h());
-//! println!("attrs: {:?}", rect.attrs);
-//! // println!("attrs: {:?}", rect.attrs()); // Method `attrs` is not generated
-//! ```
-//!
-//! ## Example: Tuple Struct
-//!
-//! Here, `aksr` is used with a tuple struct, `Color`. The example demonstrates customizing getter and setter prefixes, defining an alias for a specific field, and configuring one field to be incrementable.
-//!
-//! ```rust
-//! use aksr::Builder;
-//!
-//! #[derive(Builder, Default, Debug)]
-//! struct Color<'a>(
-//!     u8,
-//!     u8,
-//!     u8,
-//!     #[args(aka = "alpha")] f32,
-//!     #[args(inc = true, get_pre = "get", set_pre = "set")] Vec<&'a str>,
-//! );
-//!
-//! let color = Color::default()
-//!     .with_0(255)
-//!     .with_1(255)
-//!     .with_2(0)
-//!     .with_alpha(0.8)
-//!     .set_4(&["A", "B", "C"])
-//!     .set_4_inc(&["D", "E"]);
-//!
-//! println!(
-//!     "RGBA: ({}, {}, {}, {}, {:?})",
-//!     color.nth_0(),
-//!     color.nth_1(),
-//!     color.nth_2(),
-//!     color.alpha(),
-//!     color.get_4(),
-//! );
-//! ```
+//! To see the generated code, use `cargo install cargo-expand` and run `cargo expand --example rect`.
 //!
 
 use proc_macro::TokenStream;
@@ -89,16 +28,25 @@ use syn::{
 mod rules;
 use rules::Rules;
 
+// attributes
 const ARGS: &str = "args";
 const ALLOW: &str = "allow";
 const EXCEPT: &str = "except";
-const ALIAS: &str = "aka";
+const ALIAS: &str = "alias";
+#[allow(dead_code)]
+#[deprecated(since = "0.1.0", note = "use `alias` instead")]
+const ALIAS_DEPRECATED: &str = "aka";
 const GETTER: &str = "getter";
 const SETTER: &str = "setter";
 const SKIP: &str = "skip";
-const INC_FOR_VEC: &str = "inc";
-const SETTER_PREFIX: &str = "set_pre"; // TODO
-const GETTER_PREFIX: &str = "get_pre"; // TODO
+const EXTEND: &str = "extend";
+#[allow(dead_code)]
+#[deprecated(since = "0.1.0", note = "use `extend` instead")]
+const EXTEND_DEPRECATED: &str = "inc";
+const SETTER_PREFIX: &str = "setter_prefix";
+const GETTER_PREFIX: &str = "getter_prefix";
+const GETTER_VISIBILITY: &str = "getter_visibility";
+const SETTER_VISIBILITY: &str = "setter_visibility";
 const SETTER_PREFIX_DEFAULT: &str = "with";
 const GETTER_PREFIX_DEFAULT: &str = "nth";
 const PRIMITIVE_TYPES: &[&str] = &[
@@ -118,12 +66,16 @@ pub(crate) enum Tys {
     Vec,
     VecInc,
     VecString,
+    VecStringOwned,
     VecStringInc,
+    VecStringIncOwned,
     Option,
+    OptionOption,
     OptionAsRef,
     OptionVec,
     OptionString,
     OptionVecString,
+    OptionVecStringOwned,
 }
 
 #[proc_macro_derive(Builder, attributes(args))]
@@ -198,6 +150,7 @@ fn generate_from_struct(data_struct: &DataStruct) -> proc_macro2::TokenStream {
 
                                                 // Vec<String> -> &[&str]
                                                 if ident == "String" {
+                                                    // setter: &[&str]
                                                     generate(
                                                         field,
                                                         &rules,
@@ -207,7 +160,17 @@ fn generate_from_struct(data_struct: &DataStruct) -> proc_macro2::TokenStream {
                                                         Fns::Setter(Tys::VecString),
                                                     );
 
-                                                    // increment ver
+                                                    // setter: &[String] (owned)
+                                                    generate(
+                                                        field,
+                                                        &rules,
+                                                        idx,
+                                                        None,
+                                                        &mut codes,
+                                                        Fns::Setter(Tys::VecStringOwned),
+                                                    );
+
+                                                    // increment ver: &[&str]
                                                     generate(
                                                         field,
                                                         &rules,
@@ -215,6 +178,16 @@ fn generate_from_struct(data_struct: &DataStruct) -> proc_macro2::TokenStream {
                                                         None,
                                                         &mut codes,
                                                         Fns::Setter(Tys::VecStringInc),
+                                                    );
+
+                                                    // increment ver: &[String] (owned)
+                                                    generate(
+                                                        field,
+                                                        &rules,
+                                                        idx,
+                                                        None,
+                                                        &mut codes,
+                                                        Fns::Setter(Tys::VecStringIncOwned),
                                                     );
                                                 } else {
                                                     // setters
@@ -316,6 +289,7 @@ fn generate_from_struct(data_struct: &DataStruct) -> proc_macro2::TokenStream {
                                                                     if last_segment.ident
                                                                         == "String"
                                                                     {
+                                                                        // setter: &[&str]
                                                                         generate(
                                                                             field,
                                                                             &rules,
@@ -323,6 +297,16 @@ fn generate_from_struct(data_struct: &DataStruct) -> proc_macro2::TokenStream {
                                                                             None,
                                                                             &mut codes,
                                                                             Fns::Setter(Tys::OptionVecString),
+                                                                        );
+
+                                                                        // setter: &[String] (owned)
+                                                                        generate(
+                                                                            field,
+                                                                            &rules,
+                                                                            idx,
+                                                                            None,
+                                                                            &mut codes,
+                                                                            Fns::Setter(Tys::OptionVecStringOwned),
                                                                         );
                                                                     } else {
                                                                         generate(
@@ -381,13 +365,34 @@ fn generate_from_struct(data_struct: &DataStruct) -> proc_macro2::TokenStream {
                                                     );
                                                 } else {
                                                     // T => T
+                                                    // Check if arg is itself an Option type (for nested Option<Option<T>>)
+                                                    let is_nested_option =
+                                                        if let GenericArgument::Type(Type::Path(
+                                                            inner_type_path,
+                                                        )) = arg
+                                                        {
+                                                            if let Some(inner_segment) =
+                                                                inner_type_path.path.segments.last()
+                                                            {
+                                                                inner_segment.ident == "Option"
+                                                            } else {
+                                                                false
+                                                            }
+                                                        } else {
+                                                            false
+                                                        };
+
                                                     generate(
                                                         field,
                                                         &rules,
                                                         idx,
                                                         Some(arg),
                                                         &mut codes,
-                                                        Fns::Setter(Tys::Option),
+                                                        Fns::Setter(if is_nested_option {
+                                                            Tys::OptionOption
+                                                        } else {
+                                                            Tys::Option
+                                                        }),
                                                     );
 
                                                     if PRIMITIVE_TYPES
@@ -423,13 +428,34 @@ fn generate_from_struct(data_struct: &DataStruct) -> proc_macro2::TokenStream {
                                             {
                                                 if let Some(arg) = args.args.first() {
                                                     // setters
+                                                    // Check if arg is itself an Option type (for nested Option<Option<T>>)
+                                                    let is_nested_option =
+                                                        if let GenericArgument::Type(Type::Path(
+                                                            inner_type_path,
+                                                        )) = arg
+                                                        {
+                                                            if let Some(inner_segment) =
+                                                                inner_type_path.path.segments.last()
+                                                            {
+                                                                inner_segment.ident == "Option"
+                                                            } else {
+                                                                false
+                                                            }
+                                                        } else {
+                                                            false
+                                                        };
+
                                                     generate(
                                                         field,
                                                         &rules,
                                                         idx,
                                                         Some(arg),
                                                         &mut codes,
-                                                        Fns::Setter(Tys::Option),
+                                                        Fns::Setter(if is_nested_option {
+                                                            Tys::OptionOption
+                                                        } else {
+                                                            Tys::Option
+                                                        }),
                                                     );
 
                                                     // getters
@@ -554,6 +580,10 @@ fn generate(
     // setter_name & getter_name
     let (setter_name, getter_name) = rules.generate_setter_getter_names(field, idx); // (move inside????)
 
+    // visibility tokens
+    let setter_visibility = rules.setter_visibility_token();
+    let getter_visibility = rules.getter_visibility_token();
+
     // attrs
     let field_type = &field.ty;
     let field_name = field.ident.as_ref();
@@ -578,7 +608,7 @@ fn generate(
                         #[doc = " # Returns"]
                         #[doc = " "]
                         #[doc = " Returns `Self` to allow method chaining."]
-                        pub fn #setter_name(mut self, x: #field_type) -> Self {
+                        #setter_visibility fn #setter_name(mut self, x: #field_type) -> Self {
                             self.#field_access = x;
                             self
                         }
@@ -595,7 +625,7 @@ fn generate(
                         #[doc = " # Returns"]
                         #[doc = " "]
                         #[doc = " Returns `Self` to allow method chaining."]
-                        pub fn #setter_name(mut self, x: &str) -> Self {
+                        #setter_visibility fn #setter_name(mut self, x: &str) -> Self {
                             self.#field_access = x.to_string();
                             self
                         }
@@ -613,18 +643,18 @@ fn generate(
                         #[doc = " # Returns"]
                         #[doc = " "]
                         #[doc = " Returns `Self` to allow method chaining."]
-                        pub fn #setter_name(mut self, x: &[#arg]) -> Self {
-                            self.#field_access = x.to_vec();
+                        #setter_visibility fn #setter_name(mut self, x: &[#arg]) -> Self {
+                            if !x.is_empty() {
+                                self.#field_access = x.to_vec();
+                            }
                             self
                         }
                     }
                 }
                 Tys::VecInc if rules.inc_for_vec => {
                     let arg = arg.expect("VecInc setter requires a generic argument");
-                    let setter_name = Ident::new(
-                        &format!("{}_{}", setter_name, INC_FOR_VEC),
-                        Span::call_site(),
-                    );
+                    let setter_name =
+                        Ident::new(&format!("{setter_name}_{EXTEND}"), Span::call_site());
                     quote! {
                         #[doc = concat!(" Appends values to the `", stringify!(#field_access), "` field.")]
                         #[doc = " "]
@@ -635,11 +665,13 @@ fn generate(
                         #[doc = " # Returns"]
                         #[doc = " "]
                         #[doc = " Returns `Self` to allow method chaining."]
-                        pub fn #setter_name(mut self, x: &[#arg]) -> Self {
-                            if self.#field_access.is_empty() {
-                                self.#field_access = Vec::from(x);
-                            } else {
-                                self.#field_access.extend_from_slice(x);
+                        #setter_visibility fn #setter_name(mut self, x: &[#arg]) -> Self {
+                            if !x.is_empty() {
+                                if self.#field_access.is_empty() {
+                                    self.#field_access = Vec::from(x);
+                                } else {
+                                    self.#field_access.extend_from_slice(x);
+                                }
                             }
                             self
                         }
@@ -656,17 +688,42 @@ fn generate(
                         #[doc = " # Returns"]
                         #[doc = " "]
                         #[doc = " Returns `Self` to allow method chaining."]
-                        pub fn #setter_name(mut self, x: &[&str]) -> Self {
-                            self.#field_access = x.iter().map(|s| s.to_string()).collect();
+                        #setter_visibility fn #setter_name(mut self, x: &[&str]) -> Self {
+                            if !x.is_empty() {
+                                self.#field_access = x.iter().map(|s| s.to_string()).collect();
+                            }
+                            self
+                        }
+                    }
+                }
+                Tys::VecStringOwned => {
+                    let setter_name_owned =
+                        Ident::new(&format!("{setter_name}_owned"), Span::call_site());
+                    quote! {
+                        #[doc = concat!(" Sets the value of the `", stringify!(#field_access), "` field from a slice of owned strings.")]
+                        #[doc = " "]
+                        #[doc = " # Arguments"]
+                        #[doc = " "]
+                        #[doc = " * `x` - A slice of `String` to be cloned into the vector."]
+                        #[doc = " "]
+                        #[doc = " # Returns"]
+                        #[doc = " "]
+                        #[doc = " Returns `Self` to allow method chaining."]
+                        #[doc = " "]
+                        #[doc = " # Note"]
+                        #[doc = " "]
+                        #[doc = " This method is useful when you already have a `Vec<String>` and want to avoid converting to `&[&str]`."]
+                        #setter_visibility fn #setter_name_owned(mut self, x: &[String]) -> Self {
+                            if !x.is_empty() {
+                                self.#field_access = x.to_vec();
+                            }
                             self
                         }
                     }
                 }
                 Tys::VecStringInc if rules.inc_for_vec => {
-                    let setter_name = Ident::new(
-                        &format!("{}_{}", setter_name, INC_FOR_VEC),
-                        Span::call_site(),
-                    );
+                    let setter_name =
+                        Ident::new(&format!("{setter_name}_{EXTEND}"), Span::call_site());
                     quote! {
                         #[doc = concat!(" Appends string values to the `", stringify!(#field_access), "` field.")]
                         #[doc = " "]
@@ -677,12 +734,43 @@ fn generate(
                         #[doc = " # Returns"]
                         #[doc = " "]
                         #[doc = " Returns `Self` to allow method chaining."]
-                        pub fn #setter_name(mut self, x: &[&str]) -> Self {
-                            if self.#field_access.is_empty() {
-                                self.#field_access = x.iter().map(|s| s.to_string()).collect();
-                            } else {
-                                let mut x = x.iter().map(|s| s.to_string()).collect::<Vec<_>>();
-                                self.#field_access.append(&mut x);
+                        #setter_visibility fn #setter_name(mut self, x: &[&str]) -> Self {
+                            if !x.is_empty() {
+                                if self.#field_access.is_empty() {
+                                    self.#field_access = x.iter().map(|s| s.to_string()).collect();
+                                } else {
+                                    let mut x = x.iter().map(|s| s.to_string()).collect::<Vec<_>>();
+                                    self.#field_access.append(&mut x);
+                                }
+                            }
+                            self
+                        }
+                    }
+                }
+                Tys::VecStringIncOwned if rules.inc_for_vec => {
+                    let setter_name_owned =
+                        Ident::new(&format!("{setter_name}_{EXTEND}_owned"), Span::call_site());
+                    quote! {
+                        #[doc = concat!(" Appends owned string values to the `", stringify!(#field_access), "` field.")]
+                        #[doc = " "]
+                        #[doc = " # Arguments"]
+                        #[doc = " "]
+                        #[doc = " * `x` - A slice of `String` to be appended to the vector."]
+                        #[doc = " "]
+                        #[doc = " # Returns"]
+                        #[doc = " "]
+                        #[doc = " Returns `Self` to allow method chaining."]
+                        #[doc = " "]
+                        #[doc = " # Note"]
+                        #[doc = " "]
+                        #[doc = " This method is useful when you already have a `Vec<String>` and want to avoid converting to `&[&str]`."]
+                        #setter_visibility fn #setter_name_owned(mut self, x: &[String]) -> Self {
+                            if !x.is_empty() {
+                                if self.#field_access.is_empty() {
+                                    self.#field_access = x.to_vec();
+                                } else {
+                                    self.#field_access.extend_from_slice(x);
+                                }
                             }
                             self
                         }
@@ -699,8 +787,27 @@ fn generate(
                         #[doc = " # Returns"]
                         #[doc = " "]
                         #[doc = " Returns `Self` to allow method chaining."]
-                        pub fn #setter_name(mut self, x: #arg) -> Self {
+                        #setter_visibility fn #setter_name(mut self, x: #arg) -> Self {
                             self.#field_access = Some(x);
+                            self
+                        }
+                    }
+                }
+                Tys::OptionOption => {
+                    quote! {
+                        #[doc = concat!(" Sets the value of the optional `", stringify!(#field_access), "` field.")]
+                        #[doc = " "]
+                        #[doc = " # Arguments"]
+                        #[doc = " "]
+                        #[doc = " * `x` - An `Option` value to be assigned. If `None`, the field remains unchanged."]
+                        #[doc = " "]
+                        #[doc = " # Returns"]
+                        #[doc = " "]
+                        #[doc = " Returns `Self` to allow method chaining."]
+                        #setter_visibility fn #setter_name(mut self, x: #arg) -> Self {
+                            if x.is_some() {
+                                self.#field_access = Some(x);
+                            }
                             self
                         }
                     }
@@ -717,8 +824,10 @@ fn generate(
                         #[doc = " # Returns"]
                         #[doc = " "]
                         #[doc = " Returns `Self` to allow method chaining."]
-                        pub fn #setter_name(mut self, x: &[#arg]) -> Self {
-                            self.#field_access = Some(x.to_vec());
+                        #setter_visibility fn #setter_name(mut self, x: &[#arg]) -> Self {
+                            if !x.is_empty() {
+                                self.#field_access = Some(x.to_vec());
+                            }
                             self
                         }
                     }
@@ -734,8 +843,35 @@ fn generate(
                         #[doc = " # Returns"]
                         #[doc = " "]
                         #[doc = " Returns `Self` to allow method chaining."]
-                        pub fn #setter_name(mut self, x: &[&str]) -> Self {
-                            self.#field_access = Some(x.iter().map(|s| s.to_string()).collect());
+                        #setter_visibility fn #setter_name(mut self, x: &[&str]) -> Self {
+                            if !x.is_empty() {
+                                self.#field_access = Some(x.iter().map(|s| s.to_string()).collect());
+                            }
+                            self
+                        }
+                    }
+                }
+                Tys::OptionVecStringOwned => {
+                    let setter_name_owned =
+                        Ident::new(&format!("{setter_name}_owned"), Span::call_site());
+                    quote! {
+                        #[doc = concat!(" Sets the value of the optional `", stringify!(#field_access), "` field from a slice of owned strings.")]
+                        #[doc = " "]
+                        #[doc = " # Arguments"]
+                        #[doc = " "]
+                        #[doc = " * `x` - A slice of `String` to be cloned into a vector and wrapped in `Some`."]
+                        #[doc = " "]
+                        #[doc = " # Returns"]
+                        #[doc = " "]
+                        #[doc = " Returns `Self` to allow method chaining."]
+                        #[doc = " "]
+                        #[doc = " # Note"]
+                        #[doc = " "]
+                        #[doc = " This method is useful when you already have a `Vec<String>` and want to avoid converting to `&[&str]`."]
+                        #setter_visibility fn #setter_name_owned(mut self, x: &[String]) -> Self {
+                            if !x.is_empty() {
+                                self.#field_access = Some(x.to_vec());
+                            }
                             self
                         }
                     }
@@ -751,7 +887,7 @@ fn generate(
                         #[doc = " # Returns"]
                         #[doc = " "]
                         #[doc = " Returns `Self` to allow method chaining."]
-                        pub fn #setter_name(mut self, x: &str) -> Self {
+                        #setter_visibility fn #setter_name(mut self, x: &str) -> Self {
                             self.#field_access = Some(x.to_string());
                             self
                         }
@@ -768,7 +904,7 @@ fn generate(
                 Tys::Basic => {
                     quote! {
                         #[doc = concat!(" Returns the value of the `", stringify!(#field_access), "` field.")]
-                        pub fn #getter_name(&self) -> #field_type {
+                        #getter_visibility fn #getter_name(&self) -> #field_type {
                             self.#field_access
                         }
                     }
@@ -776,7 +912,7 @@ fn generate(
                 Tys::Ref => {
                     quote! {
                         #[doc = concat!(" Returns a reference to the `", stringify!(#field_access), "` field.")]
-                        pub fn #getter_name(&self) -> &#field_type {
+                        #getter_visibility fn #getter_name(&self) -> &#field_type {
                             &self.#field_access
                         }
                     }
@@ -784,7 +920,7 @@ fn generate(
                 Tys::String => {
                     quote! {
                         #[doc = concat!(" Returns a string slice of the `", stringify!(#field_access), "` field.")]
-                        pub fn #getter_name(&self) -> &str {
+                        #getter_visibility fn #getter_name(&self) -> &str {
                             &self.#field_access
                         }
                     }
@@ -793,7 +929,7 @@ fn generate(
                     let arg = arg.expect("Vec getter requires a generic argument");
                     quote! {
                         #[doc = concat!(" Returns a slice of the `", stringify!(#field_access), "` field.")]
-                        pub fn #getter_name(&self) -> &[#arg] {
+                        #getter_visibility fn #getter_name(&self) -> &[#arg] {
                             &self.#field_access
                         }
                     }
@@ -802,7 +938,7 @@ fn generate(
                     let arg = arg.expect("Option getter requires a generic argument");
                     quote! {
                         #[doc = concat!(" Returns the value of the optional `", stringify!(#field_access), "` field.")]
-                        pub fn #getter_name(&self) -> Option<#arg> {
+                        #getter_visibility fn #getter_name(&self) -> Option<#arg> {
                             self.#field_access
                         }
                     }
@@ -811,7 +947,7 @@ fn generate(
                     let arg = arg.expect("OptionAsRef getter requires a generic argument");
                     quote! {
                         #[doc = concat!(" Returns an optional reference to the `", stringify!(#field_access), "` field.")]
-                        pub fn #getter_name(&self) -> Option<&#arg> {
+                        #getter_visibility fn #getter_name(&self) -> Option<&#arg> {
                             self.#field_access.as_ref()
                         }
                     }
@@ -819,7 +955,7 @@ fn generate(
                 Tys::OptionString => {
                     quote! {
                         #[doc = concat!(" Returns an optional string slice of the `", stringify!(#field_access), "` field.")]
-                        pub fn #getter_name(&self) -> Option<&str> {
+                        #getter_visibility fn #getter_name(&self) -> Option<&str> {
                             self.#field_access.as_deref()
                         }
                     }
@@ -828,7 +964,7 @@ fn generate(
                     let arg = arg.expect("OptionVec getter requires a generic argument");
                     quote! {
                         #[doc = concat!(" Returns an optional slice of the `", stringify!(#field_access), "` field.")]
-                        pub fn #getter_name(&self) -> Option<&[#arg]> {
+                        #getter_visibility fn #getter_name(&self) -> Option<&[#arg]> {
                             self.#field_access.as_deref()
                         }
                     }

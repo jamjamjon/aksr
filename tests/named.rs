@@ -28,7 +28,7 @@ pub struct Entity<'a, A: std::fmt::Debug, B> {
     char: char,
     #[args(allow(getter, setter))]
     bool: bool,
-    #[args(aka = "float64")]
+    #[args(alias = "float64")]
     f64: f64,
     f32: f32,
     i8: i8,
@@ -56,8 +56,65 @@ pub struct Entity<'a, A: std::fmt::Debug, B> {
     // vec
     vec_i8: Vec<i8>,
     vec_str: Vec<&'a str>,
-    #[args(inc = true)]
+    #[args(extend = true)]
     vec_string: Vec<String>,
+
+    // Testing setter control
+    #[args(setter = false)]
+    no_setter: u8,
+
+    // Testing getter control
+    #[args(getter = false)]
+    no_getter: u16,
+
+    // Testing setter_prefix
+    #[args(setter_prefix = "set")]
+    custom_setter: u32,
+
+    // Testing getter_prefix
+    #[args(getter_prefix = "get")]
+    custom_getter: u64,
+
+    // Testing getter_visibility
+    #[args(getter_visibility = "private")]
+    private_getter: i32,
+
+    // Testing setter_visibility
+    #[args(setter_visibility = "private")]
+    private_setter: i64,
+
+    // Testing except
+    #[args(except(setter))]
+    no_setter_field: f32,
+
+    // Testing combination: alias + extend
+    #[args(alias = "tags", extend = true)]
+    keywords: Vec<String>,
+
+    // Testing combination: alias + setter_prefix
+    #[args(alias = "width", setter_prefix = "set")]
+    w: i32,
+
+    // Testing combination: alias + getter_prefix
+    #[args(alias = "height", getter_prefix = "get")]
+    h: i32,
+
+    // Testing combination: alias + visibility
+    #[args(
+        alias = "desc",
+        getter_visibility = "private",
+        setter_visibility = "private"
+    )]
+    description: String,
+
+    // Testing combination: allow + except together
+    #[args(allow(getter), except(setter))]
+    readonly: bool,
+
+    // Testing combination: setter + getter control
+    #[args(setter = true, getter = false)]
+    write_only: i16,
+
     vec_vec_string: Vec<Vec<String>>,
 
     // collections: vec, hashmap, hashset. btreemap, btreeset
@@ -138,6 +195,19 @@ impl<A: Default + std::fmt::Debug, B: Default> Default for Entity<'_, A, B> {
             vec_i8: Vec::new(),
             vec_str: Vec::new(),
             vec_string: Vec::new(),
+            no_setter: 0,
+            no_getter: 0,
+            custom_setter: 0,
+            custom_getter: 0,
+            private_getter: 0,
+            private_setter: 0,
+            no_setter_field: 0.0,
+            keywords: Vec::new(),
+            w: 0,
+            h: 0,
+            description: String::new(),
+            readonly: false,
+            write_only: 0,
             vec_vec_string: Vec::new(),
             hashmap: HashMap::new(),
             hashset: HashSet::new(),
@@ -204,7 +274,24 @@ fn all() {
         .with_vec_i8(&[1, 2, 3])
         .with_vec_str(&["str1", "str2"])
         .with_vec_string(&["str1", "str2"])
-        .with_vec_string_inc(&["str3", "str4"])
+        .with_vec_string_extend(&["str3", "str4"])
+        // Test custom_setter (setter_prefix = "set")
+        .set_custom_setter(999)
+        // Test except(setter) - no setter should exist
+        // .set_no_setter_field(1.0) // This should fail - no setter
+        // Test combination: alias + extend
+        .with_tags(&["rust", "macro"])
+        .with_tags_extend(&["builder", "derive"])
+        // Test combination: alias + setter_prefix
+        .set_width(1920)
+        // Test combination: alias + getter_prefix (needs direct access since getter has prefix)
+        // h will be accessed via get_height() with prefix "get"
+        // Test combination: alias + visibility (private)
+        .with_desc("private")
+        // Test combination: allow + except
+        // .set_readonly(true) // No setter due to except
+        // Test combination: setter + getter control
+        .with_write_only(256)
         .with_vec_vec_string(&[vec!["inner1".to_string(), "inner2".to_string()]])
         .with_hashmap(HashMap::from([("k", 1)]))
         .with_hashset(HashSet::from([1, 2, 3, 1]))
@@ -290,6 +377,46 @@ fn all() {
     assert_eq!(entity.vec_str(), &["str1", "str2"]);
     assert_eq!(entity.vec_string, vec!["str1", "str2", "str3", "str4"]);
     assert_eq!(entity.vec_string(), &["str1", "str2", "str3", "str4"]);
+
+    // Test custom_setter
+    assert_eq!(entity.custom_setter, 999);
+
+    // Test custom_getter (getter_prefix = "get")
+    assert_eq!(entity.custom_getter(), 0);
+
+    // no_setter has no setter (setter = false), but has getter
+    // no_getter has no getter (getter = false), but has setter
+
+    // no_setter_field has no setter (except(setter)), but has getter
+    assert_eq!(entity.no_setter_field(), 0.0);
+
+    // Test combination: alias + extend
+    assert_eq!(entity.keywords, vec!["rust", "macro", "builder", "derive"]);
+    assert_eq!(entity.tags(), &["rust", "macro", "builder", "derive"]);
+
+    // Test combination: alias + setter_prefix
+    assert_eq!(entity.w, 1920);
+    assert_eq!(entity.width(), 1920);
+
+    // Test combination: alias + getter_prefix
+    // Note: getter_prefix affects the prefix in getter name generation
+    // Since we have alias="height", the getter is just height(), not get_height()
+    assert_eq!(entity.h, 0);
+    assert_eq!(entity.height(), 0);
+
+    // Test combination: alias + visibility
+    // Private methods are accessible in same module
+    assert_eq!(entity.desc(), "private");
+    assert_eq!(entity.description, "private");
+
+    // Test combination: allow + except
+    // readonly has allow(getter) and except(setter), so it defaults to false
+    assert!(!entity.readonly());
+
+    // Test combination: setter + getter control
+    assert_eq!(entity.write_only, 256);
+    // No getter for write_only
+
     assert_eq!(
         entity.vec_vec_string,
         vec![vec!["inner1".to_string(), "inner2".to_string()]]
@@ -377,4 +504,147 @@ fn all() {
     assert_eq!(entity.opt_opt_usize(), Some(&Some(2)));
     assert_eq!(entity.result, Ok(1));
     assert_eq!(entity.result(), &Ok(1));
+}
+
+// Test empty Vec handling
+#[test]
+fn test_empty_vec_should_not_update() {
+    let entity = Entity::<u8, String> {
+        vec_string: vec!["a".to_string(), "b".to_string()],
+        ..Default::default()
+    };
+
+    // Empty slice should not update the field
+    let result = entity.with_vec_string(&[]);
+    assert_eq!(result.vec_string, vec!["a", "b"]);
+}
+
+#[test]
+fn test_empty_vec_for_option_should_keep_none() {
+    let entity = Entity::<u8, String>::default();
+
+    // Empty slice for Option<Vec<String>> should keep it as None
+    let result = entity.with_opt_vec_string(&[]);
+    assert_eq!(result.opt_vec_string, None);
+}
+
+#[test]
+fn test_non_empty_vec_should_update() {
+    let entity = Entity::<u8, String>::default();
+
+    // Non-empty Vec<String> should update
+    let result = entity.with_vec_string(&["c", "d"]);
+    assert_eq!(result.vec_string, vec!["c", "d"]);
+
+    // Non-empty Vec for Option<Vec<String>> should set Some
+    let result = result.with_opt_vec_string(&["e", "f"]);
+    assert_eq!(
+        result.opt_vec_string,
+        Some(vec!["e".to_string(), "f".to_string()])
+    );
+}
+
+// Test nested Option handling
+#[test]
+fn test_nested_option_with_none() {
+    let entity = Entity::<u8, String>::default();
+
+    // Setting to Some(Some(2)) should work
+    let result = entity.with_opt_opt_usize(Some(2));
+    assert_eq!(result.opt_opt_usize, Some(Some(2)));
+
+    // Setting to None should keep the field unchanged
+    let result = result.with_opt_opt_usize(None);
+    assert_eq!(result.opt_opt_usize, Some(Some(2)));
+}
+
+#[test]
+fn test_nested_option_with_some_none() {
+    let entity = Entity::<u8, String> {
+        opt_opt_usize: Some(None),
+        ..Default::default()
+    };
+
+    // Passing None should keep Some(None)
+    let result = entity.with_opt_opt_usize(None);
+    assert_eq!(result.opt_opt_usize, Some(None));
+
+    // Setting to Some(5) should set field to Some(Some(5))
+    let result = result.with_opt_opt_usize(Some(5));
+    assert_eq!(result.opt_opt_usize, Some(Some(5)));
+}
+
+#[test]
+fn test_vec_string_owned() {
+    let existing = vec!["rust".to_string(), "tokio".to_string()];
+    let entity = Entity::<u8, String>::default().with_vec_string_owned(&existing);
+
+    assert_eq!(entity.vec_string, vec!["rust", "tokio"]);
+}
+
+#[test]
+fn test_vec_string_extend_owned() {
+    let initial = vec!["a".to_string(), "b".to_string()];
+    let more = vec!["c".to_string(), "d".to_string()];
+
+    let entity = Entity::<u8, String>::default()
+        .with_vec_string_owned(&initial)
+        .with_vec_string_extend_owned(&more);
+
+    assert_eq!(entity.vec_string, vec!["a", "b", "c", "d"]);
+}
+
+#[test]
+fn test_option_vec_string_owned() {
+    let categories = vec!["web".to_string(), "backend".to_string()];
+    let entity = Entity::<u8, String>::default().with_opt_vec_string_owned(&categories);
+
+    assert_eq!(
+        entity.opt_vec_string,
+        Some(vec!["web".to_string(), "backend".to_string()])
+    );
+}
+
+#[test]
+fn test_empty_owned_vec_should_not_update() {
+    let entity = Entity::<u8, String> {
+        vec_string: vec!["initial".to_string()],
+        ..Default::default()
+    };
+
+    let empty: Vec<String> = vec![];
+    let result = entity.with_vec_string_owned(&empty);
+
+    assert_eq!(result.vec_string, vec!["initial"]);
+}
+
+#[test]
+fn test_mixed_borrowed_and_owned() {
+    let owned = vec!["rust".to_string(), "tokio".to_string()];
+    let owned2 = vec!["async".to_string()];
+
+    let entity = Entity::<u8, String>::default()
+        .with_vec_string_owned(&owned)
+        .with_vec_string_extend(&["derive"])
+        .with_vec_string_extend_owned(&owned2);
+
+    assert_eq!(entity.vec_string, vec!["rust", "tokio", "derive", "async"]);
+}
+
+// Test getter for Option<Vec<String>>
+#[test]
+fn test_option_vec_string_getter() {
+    // Test getter with Some value
+    let entity = Entity::<u8, String>::default().with_opt_vec_string(&["rust", "go", "python"]);
+
+    assert_eq!(
+        entity.opt_vec_string(),
+        Some(&["rust".to_string(), "go".to_string(), "python".to_string()][..])
+    );
+
+    // Test getter with None (empty slice)
+    let entity_none = Entity::<u8, String>::default().with_opt_vec_string(&[]);
+
+    assert_eq!(entity_none.opt_vec_string(), None);
+    assert_eq!(entity_none.opt_vec_string, None);
 }
