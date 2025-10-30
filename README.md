@@ -31,7 +31,7 @@ This allows you to use the builder pattern without creating a separate builder t
 Add `aksr` to your `Cargo.toml`:
 ```toml
 [dependencies]
-aksr = "0.0.4"
+aksr = "0.0.5"
 ```
 
 
@@ -57,18 +57,22 @@ cargo expand --example rect     # View generated code
 ## Supported Attributes
 
 | Attribute | Description | Values | Example |
-|-----------|-------------|--------|---------|
-| `alias` | Field alias for setter/getter | String | `#[args(alias = "width")]` |
-| `extend` | Enable extend methods for Vec | `true`, `false` | `#[args(extend = true)]` |
-| `setter` | Control setter generation | `true`, `false` | `#[args(setter = false)]` |
-| `getter` | Control getter generation | `true`, `false` | `#[args(getter = false)]` |
-| `setter_prefix` | Custom setter prefix | String | `#[args(setter_prefix = "set")]` |
-| `getter_prefix` | Custom getter prefix | String | `#[args(getter_prefix = "get")]` |
-| `getter_visibility` | Control getter visibility | `"pub"`, `"private"`, `"pub(crate)"`, `"pub(self)"`, `"pub(super)"`, `"pub(in path)"` | `#[args(getter_visibility = "private")]` |
-| `setter_visibility` | Control setter visibility | `"pub"`, `"private"`, `"pub(crate)"`, `"pub(self)"`, `"pub(super)"`, `"pub(in path)"` | `#[args(setter_visibility = "pub(crate)")]` |
-| `skip` | Skip both getter and setter | `true`, `false` | `#[args(skip)]` |
-| `allow` | Whitelist specific features | `setter`, `getter`, `extend`, `skip` | `#[args(allow(setter, extend))]` |
-| `except` | Blacklist specific features | `setter`, `getter`, `extend`, `skip` | `#[args(except(getter))]` |
+|-----------|-------------|--------|-------------------|
+| `skip` | Skip both getter and setter | `true`, `false` | `#[args(skip = false)]` |
+| `alias` | Field alias for setter/getter | String | `#[args(alias = "field_name")]` |
+| `setter` | Control setter generation | `true`, `false` | `#[args(setter = true)]` |
+| `getter` | Control getter generation | `true`, `false` | `#[args(getter = true)]` |
+| `allow` | Whitelist specific features | `setter`, `getter`, `extend`, `skip` | `#[args(allow(xxx, xxx))]` |
+| `except` | Blacklist specific features | `setter`, `getter`, `extend`, `skip` | `#[args(except(xxx, xxx))]` |
+| `visibility` | Control both getter/setter visibility | `"pub"`, `"private"`, `"pub(crate)"`, `"pub(self)"`, `"pub(super)"`, `"pub(in path)"` | `#[args(visibility = "pub(crate)")]` |
+| `setter_visibility` | Control setter visibility (overrides `visibility` if present) | same as above | `#[args(setter_visibility = "pub")]` |
+| `getter_visibility` | Control getter visibility (overrides `visibility` if present) | same as above | `#[args(getter_visibility = "pub")]` |
+| `setter_prefix` | Custom setter prefix | String | `#[args(setter_prefix = "with")]` |
+| `getter_prefix` | Custom getter prefix (named / tuple) | String | `#[args(getter_prefix = "field_name")]` / `#[args(getter_prefix = "nth")]` |
+| `inline` | Control inline for both getter/setter | `true`, `false`, `"always"` | `#[args(inline = true)]` |
+| `getter_inline` | Control getter inline attribute | `true`, `false`, `"always"` | `#[args(getter_inline = "always")]` |
+| `setter_inline` | Control setter inline attribute | `true`, `false`, `"always"` | `#[args(setter_inline = true)]` |
+| `extend` | Enable extend methods for Vec | `true`, `false` | `#[args(extend = false)]` |
 
 
 

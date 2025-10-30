@@ -248,7 +248,7 @@ impl<A: Default + std::fmt::Debug, B: Default> Default for Entity<'_, A, B> {
 
 #[test]
 fn all() {
-    let entity: Entity<'_, u8, String> = Entity::default()
+    let entity = Entity::<u8, String>::default()
         .with_unit(())
         .with_char('c')
         .with_bool(true)
@@ -382,7 +382,7 @@ fn all() {
     assert_eq!(entity.custom_setter, 999);
 
     // Test custom_getter (getter_prefix = "get")
-    assert_eq!(entity.custom_getter(), 0);
+    assert_eq!(entity.get_custom_getter(), 0);
 
     // no_setter has no setter (setter = false), but has getter
     // no_getter has no getter (getter = false), but has setter
@@ -400,9 +400,9 @@ fn all() {
 
     // Test combination: alias + getter_prefix
     // Note: getter_prefix affects the prefix in getter name generation
-    // Since we have alias="height", the getter is just height(), not get_height()
+    // With alias="height" and getter_prefix="get", the getter is get_height()
     assert_eq!(entity.h, 0);
-    assert_eq!(entity.height(), 0);
+    assert_eq!(entity.get_height(), 0);
 
     // Test combination: alias + visibility
     // Private methods are accessible in same module
@@ -647,4 +647,61 @@ fn test_option_vec_string_getter() {
 
     assert_eq!(entity_none.opt_vec_string(), None);
     assert_eq!(entity_none.opt_vec_string, None);
+}
+
+#[derive(Builder, Debug, Default)]
+struct PrefixTest {
+    // default behavior: setter_prefix="with", getter_prefix=""
+    default_field: String,
+    #[args(setter_prefix = "set")]
+    custom_setter: u32,
+    #[args(getter_prefix = "get")]
+    custom_getter: u64,
+    #[args(setter_prefix = "set", getter_prefix = "get")]
+    both_custom: i32,
+    #[args(setter_prefix = "")]
+    empty_setter: String,
+    #[args(getter_prefix = "")]
+    empty_getter: u64,
+    #[args(setter_prefix = "", getter_prefix = "")]
+    both_empty: bool,
+    #[args(alias = "renamed")]
+    alias_default: String,
+    #[args(alias = "alias_setter", setter_prefix = "set")]
+    alias_custom_setter: u32,
+    #[args(alias = "alias_getter", getter_prefix = "get")]
+    alias_custom_getter: u64,
+    #[args(alias = "full_custom", setter_prefix = "set", getter_prefix = "get")]
+    alias_both_custom: i32,
+    #[args(alias = "direct_name", getter_prefix = "")]
+    alias_empty_getter: String,
+}
+
+#[test]
+fn test_prefix_combinations() {
+    let test = PrefixTest::default()
+        .with_default_field("default")
+        .set_custom_setter(100)
+        .with_custom_getter(200)
+        .set_both_custom(300)
+        .with_empty_setter("empty_s")
+        .with_empty_getter(400)
+        .with_both_empty(true)
+        .with_renamed("renamed_value")
+        .set_alias_setter(500)
+        .with_alias_getter(600)
+        .set_full_custom(700)
+        .with_direct_name("direct");
+    assert_eq!(test.default_field(), "default");
+    assert_eq!(test.custom_setter(), 100);
+    assert_eq!(test.get_custom_getter(), 200);
+    assert_eq!(test.get_both_custom(), 300);
+    assert_eq!(test.empty_setter(), "empty_s");
+    assert_eq!(test.empty_getter(), 400);
+    assert!(test.both_empty());
+    assert_eq!(test.renamed(), "renamed_value");
+    assert_eq!(test.alias_setter(), 500);
+    assert_eq!(test.get_alias_getter(), 600);
+    assert_eq!(test.get_full_custom(), 700);
+    assert_eq!(test.direct_name(), "direct");
 }

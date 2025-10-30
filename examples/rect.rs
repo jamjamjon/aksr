@@ -19,7 +19,7 @@ struct Rect {
 
     // Generates: width() -> f32, with_width(v: f32) -> Self
     // Field internally named 'w' but publicly accessed as 'width'
-    #[args(alias = "width")]
+    #[args(alias = "width", getter_inline = "always", setter_inline = true)]
     w: f32,
 
     // Generates: height() -> f32, set_height(v: f32) -> Self

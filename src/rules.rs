@@ -4,9 +4,9 @@ use proc_macro2::{Ident, Span};
 use syn::{Expr, ExprLit, Field, Lit};
 
 use crate::{
-    ALIAS, ALIAS_DEPRECATED, ALLOW, ARGS, EXCEPT, EXTEND, EXTEND_DEPRECATED, GETTER, GETTER_PREFIX,
-    GETTER_PREFIX_DEFAULT, GETTER_VISIBILITY, SETTER, SETTER_PREFIX, SETTER_PREFIX_DEFAULT,
-    SETTER_VISIBILITY, SKIP,
+    ALIAS, ALIAS_DEPRECATED, ALLOW, ARGS, EXCEPT, EXTEND, EXTEND_DEPRECATED, GETTER, GETTER_INLINE,
+    GETTER_PREFIX, GETTER_PREFIX_DEFAULT, GETTER_VISIBILITY, INLINE, SETTER, SETTER_INLINE,
+    SETTER_PREFIX, SETTER_PREFIX_DEFAULT, SETTER_VISIBILITY, SKIP, VISIBILITY,
 };
 
 #[derive(Debug)]
@@ -19,6 +19,15 @@ pub(crate) struct Rules {
     pub gen_setter: bool,
     pub getter_visibility: Option<String>,
     pub setter_visibility: Option<String>,
+    pub getter_inline: Option<InlineMode>,
+    pub setter_inline: Option<InlineMode>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub(crate) enum InlineMode {
+    None,    // No inline attribute
+    Default, // #[inline]
+    Always,  // #[inline(always)]
 }
 
 impl Default for Rules {
@@ -27,11 +36,13 @@ impl Default for Rules {
             alias: None,
             inc_for_vec: false,
             prefix_setter: SETTER_PREFIX_DEFAULT.into(),
-            prefix_getter: GETTER_PREFIX_DEFAULT.into(),
+            prefix_getter: String::new(), // Empty for named structs, will use "nth" for tuple structs
             gen_getter: true,
             gen_setter: true,
-            getter_visibility: None, // Default: pub
-            setter_visibility: None, // Default: pub
+            getter_visibility: None,                  // Default: pub
+            setter_visibility: None,                  // Default: pub
+            getter_inline: Some(InlineMode::Always),  // Default: #[inline(always)] for getters
+            setter_inline: Some(InlineMode::Default), // Default: #[inline] for setters
         }
     }
 }
@@ -90,7 +101,13 @@ impl From<&Field> for Rules {
                                 lit: Lit::Str(s), ..
                             })) = meta.value().and_then(|v| v.parse::<Expr>())
                             {
-                                rules.prefix_setter = s.value();
+                                let value = s.value();
+                                // setter_prefix cannot be empty, use default if empty
+                                rules.prefix_setter = if value.is_empty() {
+                                    SETTER_PREFIX_DEFAULT.into()
+                                } else {
+                                    value
+                                };
                             } else {
                                 return Err(
                                     meta.error("Expected a string literal for setter_prefix")
@@ -135,6 +152,18 @@ impl From<&Field> for Rules {
                                 );
                             }
                         }
+                        Some(INLINE) => {
+                            // Parse inline for both getter and setter
+                            let inline_mode = Rules::parse_inline_value(&meta)?;
+                            rules.getter_inline = Some(inline_mode);
+                            rules.setter_inline = Some(inline_mode);
+                        }
+                        Some(GETTER_INLINE) => {
+                            rules.getter_inline = Some(Rules::parse_inline_value(&meta)?);
+                        }
+                        Some(SETTER_INLINE) => {
+                            rules.setter_inline = Some(Rules::parse_inline_value(&meta)?);
+                        }
                         Some(ALLOW) => {
                             meta.parse_nested_meta(|nested| {
                                 if let Some(ident) = nested.path.get_ident() {
@@ -170,6 +199,19 @@ impl From<&Field> for Rules {
                                 }
                                 Ok(())
                             })?;
+                        }
+                        Some(VISIBILITY) => {
+                            if let Ok(Expr::Lit(ExprLit {
+                                lit: Lit::Str(s), ..
+                            })) = meta.value().and_then(|v| v.parse::<Expr>())
+                            {
+                                let vis = s.value();
+                                let vis_val = Rules::parse_visibility(&vis);
+                                rules.getter_visibility = Some(vis_val.clone());
+                                rules.setter_visibility = Some(vis_val);
+                            } else {
+                                return Err(meta.error("Expected a string literal for visibility"));
+                            }
                         }
                         _ => return Err(meta.error("Unsupported argument")),
                     }
@@ -258,41 +300,116 @@ impl Rules {
         }
     }
 
+    /// Parse inline attribute value
+    /// Supports: #[args(inline)], #[args(inline = true)], #[args(inline = "always")]
+    pub fn parse_inline_value(meta: &syn::meta::ParseNestedMeta) -> syn::Result<InlineMode> {
+        // Try to parse value
+        if let Ok(value) = meta.value() {
+            let expr = value.parse::<Expr>()?;
+            match expr {
+                Expr::Lit(ExprLit {
+                    lit: Lit::Bool(b), ..
+                }) => {
+                    if b.value {
+                        Ok(InlineMode::Default)
+                    } else {
+                        Ok(InlineMode::None)
+                    }
+                }
+                Expr::Lit(ExprLit {
+                    lit: Lit::Str(s), ..
+                }) => {
+                    match s.value().to_lowercase().as_str() {
+                        "always" => Ok(InlineMode::Always),
+                        "true" | "yes" | "default" => Ok(InlineMode::Default),
+                        "false" | "no" | "none" => Ok(InlineMode::None),
+                        _ => Err(meta
+                            .error("Expected 'always', 'true', 'false', or no value for inline")),
+                    }
+                }
+                _ => Err(meta.error("Expected a boolean or string for inline")),
+            }
+        } else {
+            // No value means #[args(inline)] -> default inline
+            Ok(InlineMode::Default)
+        }
+    }
+
+    /// Generate inline attribute tokens for getter
+    pub fn getter_inline_token(&self) -> proc_macro2::TokenStream {
+        Rules::inline_token_impl(&self.getter_inline)
+    }
+
+    /// Generate inline attribute tokens for setter
+    pub fn setter_inline_token(&self) -> proc_macro2::TokenStream {
+        Rules::inline_token_impl(&self.setter_inline)
+    }
+
+    /// Internal implementation for generating inline tokens
+    fn inline_token_impl(inline_option: &Option<InlineMode>) -> proc_macro2::TokenStream {
+        use proc_macro2::TokenStream;
+        use quote::quote;
+
+        match inline_option {
+            Some(InlineMode::Always) => quote! { #[inline(always)] },
+            Some(InlineMode::Default) => quote! { #[inline] },
+            Some(InlineMode::None) | None => TokenStream::new(),
+        }
+    }
+
     pub fn generate_setter_getter_names(&self, field: &Field, idx: usize) -> (Ident, Ident) {
         match &field.ident {
-            None => match &self.alias {
-                // unnamed: index, alias
-                Some(alias) => {
-                    let setter_name = Ident::new(
-                        &format!("{}_{}", self.prefix_setter, alias),
-                        Span::call_site(),
-                    );
-                    let getter_name = Ident::new(&format!("{alias}"), Span::call_site());
-                    (setter_name, getter_name)
-                }
-                None => {
-                    let setter_name = Ident::new(
-                        &format!("{}_{}", self.prefix_setter, idx),
-                        Span::call_site(),
-                    );
-                    let getter_name = Ident::new(
-                        &format!("{}_{}", self.prefix_getter, idx),
-                        Span::call_site(),
-                    );
-                    (setter_name, getter_name)
-                }
-            },
-            Some(ident) => {
-                // named: ident, alias
-                let setter_name = match &self.alias {
-                    None => format!("{}_{}", self.prefix_setter, ident),
-                    Some(alias) => format!("{}_{}", self.prefix_setter, alias),
+            None => {
+                // Tuple struct: for getter, if prefix is empty and no alias, use "nth" as default
+                let actual_getter_prefix = if self.prefix_getter.is_empty() && self.alias.is_none()
+                {
+                    GETTER_PREFIX_DEFAULT
+                } else {
+                    &self.prefix_getter
                 };
+
+                match &self.alias {
+                    // Tuple struct with alias
+                    Some(alias) => {
+                        // setter_prefix is never empty (enforced in parsing)
+                        let setter_name = format!("{}_{}", self.prefix_setter, alias);
+                        let setter_name = Ident::new(&setter_name, Span::call_site());
+
+                        // getter: if prefix is empty, use alias directly; otherwise prefix_alias
+                        let getter_name = if actual_getter_prefix.is_empty() {
+                            format!("{alias}")
+                        } else {
+                            format!("{}_{}", actual_getter_prefix, alias)
+                        };
+                        let getter_name = Ident::new(&getter_name, Span::call_site());
+                        (setter_name, getter_name)
+                    }
+                    None => {
+                        // Tuple struct without alias: use index
+                        // setter_prefix is never empty (enforced in parsing)
+                        let setter_name = format!("{}_{}", self.prefix_setter, idx);
+                        let setter_name = Ident::new(&setter_name, Span::call_site());
+
+                        // getter: use actual_getter_prefix (which defaults to "nth" for tuple structs)
+                        let getter_name = format!("{}_{}", actual_getter_prefix, idx);
+                        let getter_name = Ident::new(&getter_name, Span::call_site());
+                        (setter_name, getter_name)
+                    }
+                }
+            }
+            Some(ident) => {
+                // Named struct
+                let name_or_alias = self.alias.as_ref().unwrap_or(ident);
+
+                // setter: always use prefix (prefix is never empty)
+                let setter_name = format!("{}_{}", self.prefix_setter, name_or_alias);
                 let setter_name = Ident::new(&setter_name, Span::call_site());
 
-                let getter_name = match &self.alias {
-                    None => format!("{ident}"),
-                    Some(alias) => format!("{alias}"),
+                // getter: if prefix is empty, use name/alias directly; otherwise prefix_name
+                let getter_name = if self.prefix_getter.is_empty() {
+                    format!("{name_or_alias}")
+                } else {
+                    format!("{}_{}", self.prefix_getter, name_or_alias)
                 };
                 let getter_name = Ident::new(&getter_name, Span::call_site());
                 (setter_name, getter_name)

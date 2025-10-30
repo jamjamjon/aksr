@@ -45,13 +45,36 @@ const EXTEND: &str = "extend";
 const EXTEND_DEPRECATED: &str = "inc";
 const SETTER_PREFIX: &str = "setter_prefix";
 const GETTER_PREFIX: &str = "getter_prefix";
+const VISIBILITY: &str = "visibility";
 const GETTER_VISIBILITY: &str = "getter_visibility";
 const SETTER_VISIBILITY: &str = "setter_visibility";
+const INLINE: &str = "inline";
+const GETTER_INLINE: &str = "getter_inline";
+const SETTER_INLINE: &str = "setter_inline";
 const SETTER_PREFIX_DEFAULT: &str = "with";
 const GETTER_PREFIX_DEFAULT: &str = "nth";
 const PRIMITIVE_TYPES: &[&str] = &[
-    "i8", "i16", "i32", "i64", "i128", "isize", "u8", "u16", "u32", "u64", "u128", "usize", "bool",
-    "char", "unit", "f32", "f64",
+    "i8",
+    "i16",
+    "i32",
+    "i64",
+    "i128",
+    "isize",
+    "u8",
+    "u16",
+    "u32",
+    "u64",
+    "u128",
+    "usize",
+    "bool",
+    "char",
+    "unit",
+    "f32",
+    "f64",
+    "f16",
+    "bf16",
+    "half::f16",
+    "half::bf16",
 ];
 
 pub(crate) enum Fns {
@@ -86,15 +109,15 @@ pub fn derive(x: TokenStream) -> TokenStream {
 }
 
 fn build_expanded(st: DeriveInput) -> proc_macro2::TokenStream {
-    // generate
-    let code = match &st.data {
-        Data::Struct(data) => generate_from_struct(data),
-        Data::Enum(_) | Data::Union(_) => panic!("`aksr` Builder can only be derived for struct"),
-    };
-
     // attrs
     let (struct_name, (impl_generics, ty_generics, where_clause)) =
         (&st.ident, &st.generics.split_for_impl());
+
+    // generate
+    let code = match &st.data {
+        Data::Struct(data) => generate_from_struct(struct_name, data),
+        Data::Enum(_) | Data::Union(_) => panic!("`aksr` Builder can only be derived for struct"),
+    };
 
     // token stream
     quote! {
@@ -104,7 +127,7 @@ fn build_expanded(st: DeriveInput) -> proc_macro2::TokenStream {
     }
 }
 
-fn generate_from_struct(data_struct: &DataStruct) -> proc_macro2::TokenStream {
+fn generate_from_struct(struct_name: &Ident, data_struct: &DataStruct) -> proc_macro2::TokenStream {
     // code container
     let mut codes = quote! {};
 
@@ -120,6 +143,7 @@ fn generate_from_struct(data_struct: &DataStruct) -> proc_macro2::TokenStream {
                     match last_segment.ident.to_string().as_str() {
                         "String" => {
                             generate(
+                                struct_name,
                                 field,
                                 &rules,
                                 idx,
@@ -128,6 +152,7 @@ fn generate_from_struct(data_struct: &DataStruct) -> proc_macro2::TokenStream {
                                 Fns::Setter(Tys::String),
                             );
                             generate(
+                                struct_name,
                                 field,
                                 &rules,
                                 idx,
@@ -152,6 +177,7 @@ fn generate_from_struct(data_struct: &DataStruct) -> proc_macro2::TokenStream {
                                                 if ident == "String" {
                                                     // setter: &[&str]
                                                     generate(
+                                                        struct_name,
                                                         field,
                                                         &rules,
                                                         idx,
@@ -162,6 +188,7 @@ fn generate_from_struct(data_struct: &DataStruct) -> proc_macro2::TokenStream {
 
                                                     // setter: &[String] (owned)
                                                     generate(
+                                                        struct_name,
                                                         field,
                                                         &rules,
                                                         idx,
@@ -172,6 +199,7 @@ fn generate_from_struct(data_struct: &DataStruct) -> proc_macro2::TokenStream {
 
                                                     // increment ver: &[&str]
                                                     generate(
+                                                        struct_name,
                                                         field,
                                                         &rules,
                                                         idx,
@@ -182,6 +210,7 @@ fn generate_from_struct(data_struct: &DataStruct) -> proc_macro2::TokenStream {
 
                                                     // increment ver: &[String] (owned)
                                                     generate(
+                                                        struct_name,
                                                         field,
                                                         &rules,
                                                         idx,
@@ -192,6 +221,7 @@ fn generate_from_struct(data_struct: &DataStruct) -> proc_macro2::TokenStream {
                                                 } else {
                                                     // setters
                                                     generate(
+                                                        struct_name,
                                                         field,
                                                         &rules,
                                                         idx,
@@ -202,6 +232,7 @@ fn generate_from_struct(data_struct: &DataStruct) -> proc_macro2::TokenStream {
 
                                                     // setters inc
                                                     generate(
+                                                        struct_name,
                                                         field,
                                                         &rules,
                                                         idx,
@@ -213,6 +244,7 @@ fn generate_from_struct(data_struct: &DataStruct) -> proc_macro2::TokenStream {
 
                                                 // getters: Vec<T> -> &[T]
                                                 generate(
+                                                    struct_name,
                                                     field,
                                                     &rules,
                                                     idx,
@@ -225,6 +257,7 @@ fn generate_from_struct(data_struct: &DataStruct) -> proc_macro2::TokenStream {
                                             // Vec<T> -> &[T]
                                             // setters
                                             generate(
+                                                struct_name,
                                                 field,
                                                 &rules,
                                                 idx,
@@ -235,6 +268,7 @@ fn generate_from_struct(data_struct: &DataStruct) -> proc_macro2::TokenStream {
 
                                             // setters inc
                                             generate(
+                                                struct_name,
                                                 field,
                                                 &rules,
                                                 idx,
@@ -244,6 +278,7 @@ fn generate_from_struct(data_struct: &DataStruct) -> proc_macro2::TokenStream {
                                             );
                                             // getters: Vec<T> -> &[T]
                                             generate(
+                                                struct_name,
                                                 field,
                                                 &rules,
                                                 idx,
@@ -291,6 +326,7 @@ fn generate_from_struct(data_struct: &DataStruct) -> proc_macro2::TokenStream {
                                                                     {
                                                                         // setter: &[&str]
                                                                         generate(
+                                                                            struct_name,
                                                                             field,
                                                                             &rules,
                                                                             idx,
@@ -301,6 +337,7 @@ fn generate_from_struct(data_struct: &DataStruct) -> proc_macro2::TokenStream {
 
                                                                         // setter: &[String] (owned)
                                                                         generate(
+                                                                            struct_name,
                                                                             field,
                                                                             &rules,
                                                                             idx,
@@ -310,6 +347,7 @@ fn generate_from_struct(data_struct: &DataStruct) -> proc_macro2::TokenStream {
                                                                         );
                                                                     } else {
                                                                         generate(
+                                                                            struct_name,
                                                                             field,
                                                                             &rules,
                                                                             idx,
@@ -323,6 +361,7 @@ fn generate_from_struct(data_struct: &DataStruct) -> proc_macro2::TokenStream {
                                                                 }
                                                             } else {
                                                                 generate(
+                                                                    struct_name,
                                                                     field,
                                                                     &rules,
                                                                     idx,
@@ -334,6 +373,7 @@ fn generate_from_struct(data_struct: &DataStruct) -> proc_macro2::TokenStream {
 
                                                             // getters: Option<Vec<T>> -> Option<&[T]>
                                                             generate(
+                                                                struct_name,
                                                                 field,
                                                                 &rules,
                                                                 idx,
@@ -346,6 +386,7 @@ fn generate_from_struct(data_struct: &DataStruct) -> proc_macro2::TokenStream {
                                                 } else if ident == "String" {
                                                     // T => String => &str
                                                     generate(
+                                                        struct_name,
                                                         field,
                                                         &rules,
                                                         idx,
@@ -356,6 +397,7 @@ fn generate_from_struct(data_struct: &DataStruct) -> proc_macro2::TokenStream {
 
                                                     // getters: Option<String> -> Option<&str>
                                                     generate(
+                                                        struct_name,
                                                         field,
                                                         &rules,
                                                         idx,
@@ -383,6 +425,7 @@ fn generate_from_struct(data_struct: &DataStruct) -> proc_macro2::TokenStream {
                                                         };
 
                                                     generate(
+                                                        struct_name,
                                                         field,
                                                         &rules,
                                                         idx,
@@ -400,6 +443,7 @@ fn generate_from_struct(data_struct: &DataStruct) -> proc_macro2::TokenStream {
                                                     {
                                                         // getters: Option<T> -> Option<T>
                                                         generate(
+                                                            struct_name,
                                                             field,
                                                             &rules,
                                                             idx,
@@ -411,6 +455,7 @@ fn generate_from_struct(data_struct: &DataStruct) -> proc_macro2::TokenStream {
                                                         // getters: Option<T> -> Option<&T>
                                                         // Option<Box<T>>, Option<Option<T>>
                                                         generate(
+                                                            struct_name,
                                                             field,
                                                             &rules,
                                                             idx,
@@ -446,6 +491,7 @@ fn generate_from_struct(data_struct: &DataStruct) -> proc_macro2::TokenStream {
                                                         };
 
                                                     generate(
+                                                        struct_name,
                                                         field,
                                                         &rules,
                                                         idx,
@@ -465,6 +511,7 @@ fn generate_from_struct(data_struct: &DataStruct) -> proc_macro2::TokenStream {
                                                                 // getters: Option<T> -> Option<T>
                                                                 // Option<&'a str>
                                                                 generate(
+                                                                    struct_name,
                                                                     field,
                                                                     &rules,
                                                                     idx,
@@ -477,6 +524,7 @@ fn generate_from_struct(data_struct: &DataStruct) -> proc_macro2::TokenStream {
                                                                 // getters: Option<T> -> Option<&T>
                                                                 // Option<(u8, i8)>
                                                                 generate(
+                                                                    struct_name,
                                                                     field,
                                                                     &rules,
                                                                     idx,
@@ -496,6 +544,7 @@ fn generate_from_struct(data_struct: &DataStruct) -> proc_macro2::TokenStream {
                         }
                         xxx => {
                             generate(
+                                struct_name,
                                 field,
                                 &rules,
                                 idx,
@@ -505,6 +554,7 @@ fn generate_from_struct(data_struct: &DataStruct) -> proc_macro2::TokenStream {
                             );
                             if PRIMITIVE_TYPES.contains(&xxx) {
                                 generate(
+                                    struct_name,
                                     field,
                                     &rules,
                                     idx,
@@ -514,6 +564,7 @@ fn generate_from_struct(data_struct: &DataStruct) -> proc_macro2::TokenStream {
                                 );
                             } else {
                                 generate(
+                                    struct_name,
                                     field,
                                     &rules,
                                     idx,
@@ -529,6 +580,7 @@ fn generate_from_struct(data_struct: &DataStruct) -> proc_macro2::TokenStream {
             ty => {
                 // setter
                 generate(
+                    struct_name,
                     field,
                     &rules,
                     idx,
@@ -542,6 +594,7 @@ fn generate_from_struct(data_struct: &DataStruct) -> proc_macro2::TokenStream {
                     Type::Reference(_) => {
                         // &'a T or &'a mut T
                         generate(
+                            struct_name,
                             field,
                             &rules,
                             idx,
@@ -552,11 +605,27 @@ fn generate_from_struct(data_struct: &DataStruct) -> proc_macro2::TokenStream {
                     }
                     Type::Array(_) | Type::Tuple(_) => {
                         // array [T; n] and tuple (A, B, C, String)
-                        generate(field, &rules, idx, None, &mut codes, Fns::Getter(Tys::Ref));
+                        generate(
+                            struct_name,
+                            field,
+                            &rules,
+                            idx,
+                            None,
+                            &mut codes,
+                            Fns::Getter(Tys::Ref),
+                        );
                     }
                     _ => {
                         // TODO: others
-                        generate(field, &rules, idx, None, &mut codes, Fns::Getter(Tys::Ref));
+                        generate(
+                            struct_name,
+                            field,
+                            &rules,
+                            idx,
+                            None,
+                            &mut codes,
+                            Fns::Getter(Tys::Ref),
+                        );
                     }
                 }
             }
@@ -570,6 +639,7 @@ fn generate_from_struct(data_struct: &DataStruct) -> proc_macro2::TokenStream {
 }
 
 fn generate(
+    struct_name: &Ident,
     field: &Field,
     rules: &Rules,
     idx: usize,
@@ -583,6 +653,10 @@ fn generate(
     // visibility tokens
     let setter_visibility = rules.setter_visibility_token();
     let getter_visibility = rules.getter_visibility_token();
+
+    // inline tokens
+    let setter_inline = rules.setter_inline_token();
+    let getter_inline = rules.getter_inline_token();
 
     // attrs
     let field_type = &field.ty;
@@ -599,15 +673,25 @@ fn generate(
             match ty {
                 Tys::Basic => {
                     quote! {
-                        #[doc = concat!(" Sets the value of the `", stringify!(#field_access), "` field.")]
-                        #[doc = " "]
+                        #[doc = concat!(" Sets the `", stringify!(#field_access), "` field.")]
+                        #[doc = ""]
                         #[doc = " # Arguments"]
-                        #[doc = " "]
-                        #[doc = " * `x` - The new value to be assigned to the field."]
-                        #[doc = " "]
+                        #[doc = ""]
+                        #[doc = " * `x` - The new value to be assigned"]
+                        #[doc = ""]
                         #[doc = " # Returns"]
-                        #[doc = " "]
-                        #[doc = " Returns `Self` to allow method chaining."]
+                        #[doc = ""]
+                        #[doc = " Returns `Self` for method chaining."]
+                        #[doc = ""]
+                        #[doc = " # Example"]
+                        #[doc = ""]
+                        #[doc = " ```"]
+                        #[doc = concat!(" let obj = ", stringify!(#struct_name), "::default().", stringify!(#setter_name), "(value);")]
+                        #[doc = " ```"]
+                        #[doc = ""]
+                        #[doc = " ---"]
+                        #[doc = " *Generated by `aksr` - Builder pattern macro*"]
+                        #setter_inline
                         #setter_visibility fn #setter_name(mut self, x: #field_type) -> Self {
                             self.#field_access = x;
                             self
@@ -616,15 +700,25 @@ fn generate(
                 }
                 Tys::String => {
                     quote! {
-                        #[doc = concat!(" Sets the value of the `", stringify!(#field_access), "` field from a string slice.")]
-                        #[doc = " "]
+                        #[doc = concat!(" Sets the `", stringify!(#field_access), "` field from a string slice.")]
+                        #[doc = ""]
                         #[doc = " # Arguments"]
-                        #[doc = " "]
-                        #[doc = " * `x` - A string slice that will be converted to a `String`."]
-                        #[doc = " "]
+                        #[doc = ""]
+                        #[doc = " * `x` - A string slice that will be converted to `String`"]
+                        #[doc = ""]
                         #[doc = " # Returns"]
-                        #[doc = " "]
-                        #[doc = " Returns `Self` to allow method chaining."]
+                        #[doc = ""]
+                        #[doc = " Returns `Self` for method chaining."]
+                        #[doc = ""]
+                        #[doc = " # Example"]
+                        #[doc = ""]
+                        #[doc = " ```"]
+                        #[doc = concat!(" let obj = ", stringify!(#struct_name), "::default().", stringify!(#setter_name), "(\"value\");")]
+                        #[doc = " ```"]
+                        #[doc = ""]
+                        #[doc = " ---"]
+                        #[doc = " *Generated by `aksr` - Builder pattern macro*"]
+                        #setter_inline
                         #setter_visibility fn #setter_name(mut self, x: &str) -> Self {
                             self.#field_access = x.to_string();
                             self
@@ -634,15 +728,29 @@ fn generate(
                 Tys::Vec => {
                     let arg = arg.expect("Vec setter requires a generic argument");
                     quote! {
-                        #[doc = concat!(" Sets the value of the `", stringify!(#field_access), "` field from a slice.")]
-                        #[doc = " "]
+                        #[doc = concat!(" Sets the `", stringify!(#field_access), "` field from a slice.")]
+                        #[doc = ""]
                         #[doc = " # Arguments"]
-                        #[doc = " "]
-                        #[doc = " * `x` - A slice of elements to be converted into a vector."]
-                        #[doc = " "]
+                        #[doc = ""]
+                        #[doc = " * `x` - A slice of elements to be converted into a vector"]
+                        #[doc = ""]
                         #[doc = " # Returns"]
-                        #[doc = " "]
-                        #[doc = " Returns `Self` to allow method chaining."]
+                        #[doc = ""]
+                        #[doc = " Returns `Self` for method chaining."]
+                        #[doc = ""]
+                        #[doc = " # Note"]
+                        #[doc = ""]
+                        #[doc = " If the slice is empty, the field remains unchanged."]
+                        #[doc = ""]
+                        #[doc = " # Example"]
+                        #[doc = ""]
+                        #[doc = " ```"]
+                        #[doc = concat!("let obj = ", stringify!(#struct_name), "::default().", stringify!(#setter_name), "(&[item1, item2]);")]
+                        #[doc = " ```"]
+                        #[doc = ""]
+                        #[doc = " ---"]
+                        #[doc = " *Generated by `aksr` - Builder pattern macro*"]
+                        #setter_inline
                         #setter_visibility fn #setter_name(mut self, x: &[#arg]) -> Self {
                             if !x.is_empty() {
                                 self.#field_access = x.to_vec();
@@ -656,15 +764,25 @@ fn generate(
                     let setter_name =
                         Ident::new(&format!("{setter_name}_{EXTEND}"), Span::call_site());
                     quote! {
-                        #[doc = concat!(" Appends values to the `", stringify!(#field_access), "` field.")]
-                        #[doc = " "]
+                        #[doc = concat!(" Appends elements to the `", stringify!(#field_access), "` field.")]
+                        #[doc = ""]
                         #[doc = " # Arguments"]
-                        #[doc = " "]
-                        #[doc = " * `x` - A slice of elements to be appended to the vector."]
-                        #[doc = " "]
+                        #[doc = ""]
+                        #[doc = " * `x` - A slice of elements to append to the vector"]
+                        #[doc = ""]
                         #[doc = " # Returns"]
-                        #[doc = " "]
-                        #[doc = " Returns `Self` to allow method chaining."]
+                        #[doc = ""]
+                        #[doc = " Returns `Self` for method chaining."]
+                        #[doc = ""]
+                        #[doc = " # Example"]
+                        #[doc = ""]
+                        #[doc = " ```"]
+                        #[doc = concat!("let obj = ", stringify!(#struct_name), "::default().", stringify!(#setter_name), "(&[item1, item2]);")]
+                        #[doc = " ```"]
+                        #[doc = ""]
+                        #[doc = " ---"]
+                        #[doc = " *Generated by `aksr` - Builder pattern macro*"]
+                        #setter_inline
                         #setter_visibility fn #setter_name(mut self, x: &[#arg]) -> Self {
                             if !x.is_empty() {
                                 if self.#field_access.is_empty() {
@@ -679,15 +797,29 @@ fn generate(
                 }
                 Tys::VecString => {
                     quote! {
-                        #[doc = concat!(" Sets the value of the `", stringify!(#field_access), "` field from a slice of string slices.")]
-                        #[doc = " "]
+                        #[doc = concat!(" Sets the `", stringify!(#field_access), "` field from a slice of string slices.")]
+                        #[doc = ""]
                         #[doc = " # Arguments"]
-                        #[doc = " "]
-                        #[doc = " * `x` - A slice of string slices to be converted into a vector of `String`."]
-                        #[doc = " "]
+                        #[doc = ""]
+                        #[doc = " * `x` - A slice of string slices that will be automatically converted to `Vec<String>`"]
+                        #[doc = ""]
                         #[doc = " # Returns"]
-                        #[doc = " "]
-                        #[doc = " Returns `Self` to allow method chaining."]
+                        #[doc = ""]
+                        #[doc = " Returns `Self` for method chaining."]
+                        #[doc = ""]
+                        #[doc = " # Note"]
+                        #[doc = ""]
+                        #[doc = " If the slice is empty, the field remains unchanged."]
+                        #[doc = ""]
+                        #[doc = " # Example"]
+                        #[doc = ""]
+                        #[doc = " ```"]
+                        #[doc = concat!("let obj = ", stringify!(#struct_name), "::default().", stringify!(#setter_name), "(&[\"str1\", \"str2\"]);")]
+                        #[doc = " ```"]
+                        #[doc = ""]
+                        #[doc = " ---"]
+                        #[doc = " *Generated by `aksr` - Builder pattern macro*"]
+                        #setter_inline
                         #setter_visibility fn #setter_name(mut self, x: &[&str]) -> Self {
                             if !x.is_empty() {
                                 self.#field_access = x.iter().map(|s| s.to_string()).collect();
@@ -700,19 +832,31 @@ fn generate(
                     let setter_name_owned =
                         Ident::new(&format!("{setter_name}_owned"), Span::call_site());
                     quote! {
-                        #[doc = concat!(" Sets the value of the `", stringify!(#field_access), "` field from a slice of owned strings.")]
-                        #[doc = " "]
+                        #[doc = concat!(" Sets the `", stringify!(#field_access), "` field from a slice of owned strings.")]
+                        #[doc = ""]
                         #[doc = " # Arguments"]
-                        #[doc = " "]
-                        #[doc = " * `x` - A slice of `String` to be cloned into the vector."]
-                        #[doc = " "]
+                        #[doc = ""]
+                        #[doc = " * `x` - A slice of `String` to be cloned into the vector"]
+                        #[doc = ""]
                         #[doc = " # Returns"]
-                        #[doc = " "]
-                        #[doc = " Returns `Self` to allow method chaining."]
-                        #[doc = " "]
+                        #[doc = ""]
+                        #[doc = " Returns `Self` for method chaining."]
+                        #[doc = ""]
                         #[doc = " # Note"]
-                        #[doc = " "]
-                        #[doc = " This method is useful when you already have a `Vec<String>` and want to avoid converting to `&[&str]`."]
+                        #[doc = ""]
+                        #[doc = " This method is useful when you already have a `Vec<String>` and want to avoid converting to `&[&str]`. "]
+                        #[doc = " If the slice is empty, the field remains unchanged."]
+                        #[doc = ""]
+                        #[doc = " # Example"]
+                        #[doc = ""]
+                        #[doc = " ```"]
+                        #[doc = concat!(" let strings = vec![String::from(\"a\"), String::from(\"b\")];")]
+                        #[doc = concat!("let obj = ", stringify!(#struct_name), "::default().", stringify!(#setter_name_owned), "(&strings);")]
+                        #[doc = " ```"]
+                        #[doc = ""]
+                        #[doc = " ---"]
+                        #[doc = " *Generated by `aksr` - Builder pattern macro*"]
+                        #setter_inline
                         #setter_visibility fn #setter_name_owned(mut self, x: &[String]) -> Self {
                             if !x.is_empty() {
                                 self.#field_access = x.to_vec();
@@ -726,14 +870,24 @@ fn generate(
                         Ident::new(&format!("{setter_name}_{EXTEND}"), Span::call_site());
                     quote! {
                         #[doc = concat!(" Appends string values to the `", stringify!(#field_access), "` field.")]
-                        #[doc = " "]
+                        #[doc = ""]
                         #[doc = " # Arguments"]
-                        #[doc = " "]
-                        #[doc = " * `x` - A slice of string slices to be appended as `String` values."]
-                        #[doc = " "]
+                        #[doc = ""]
+                        #[doc = " * `x` - A slice of string slices to append to the vector"]
+                        #[doc = ""]
                         #[doc = " # Returns"]
-                        #[doc = " "]
-                        #[doc = " Returns `Self` to allow method chaining."]
+                        #[doc = ""]
+                        #[doc = " Returns `Self` for method chaining."]
+                        #[doc = ""]
+                        #[doc = " # Example"]
+                        #[doc = ""]
+                        #[doc = " ```"]
+                        #[doc = concat!("let obj = ", stringify!(#struct_name), "::default().", stringify!(#setter_name), "(&[\"str1\", \"str2\"]);")]
+                        #[doc = " ```"]
+                        #[doc = ""]
+                        #[doc = " ---"]
+                        #[doc = " *Generated by `aksr` - Builder pattern macro*"]
+                        #setter_inline
                         #setter_visibility fn #setter_name(mut self, x: &[&str]) -> Self {
                             if !x.is_empty() {
                                 if self.#field_access.is_empty() {
@@ -752,18 +906,29 @@ fn generate(
                         Ident::new(&format!("{setter_name}_{EXTEND}_owned"), Span::call_site());
                     quote! {
                         #[doc = concat!(" Appends owned string values to the `", stringify!(#field_access), "` field.")]
-                        #[doc = " "]
+                        #[doc = ""]
                         #[doc = " # Arguments"]
-                        #[doc = " "]
-                        #[doc = " * `x` - A slice of `String` to be appended to the vector."]
-                        #[doc = " "]
+                        #[doc = ""]
+                        #[doc = " * `x` - A slice of `String` to append to the vector"]
+                        #[doc = ""]
                         #[doc = " # Returns"]
-                        #[doc = " "]
-                        #[doc = " Returns `Self` to allow method chaining."]
-                        #[doc = " "]
+                        #[doc = ""]
+                        #[doc = " Returns `Self` for method chaining."]
+                        #[doc = ""]
                         #[doc = " # Note"]
-                        #[doc = " "]
+                        #[doc = ""]
                         #[doc = " This method is useful when you already have a `Vec<String>` and want to avoid converting to `&[&str]`."]
+                        #[doc = ""]
+                        #[doc = " # Example"]
+                        #[doc = ""]
+                        #[doc = " ```"]
+                        #[doc = concat!(" let more = vec![String::from(\"c\")];")]
+                        #[doc = concat!("let obj = ", stringify!(#struct_name), "::default().", stringify!(#setter_name_owned), "(&more);")]
+                        #[doc = " ```"]
+                        #[doc = ""]
+                        #[doc = " ---"]
+                        #[doc = " *Generated by `aksr` - Builder pattern macro*"]
+                        #setter_inline
                         #setter_visibility fn #setter_name_owned(mut self, x: &[String]) -> Self {
                             if !x.is_empty() {
                                 if self.#field_access.is_empty() {
@@ -778,15 +943,29 @@ fn generate(
                 }
                 Tys::Option => {
                     quote! {
-                        #[doc = concat!(" Sets the value of the optional `", stringify!(#field_access), "` field.")]
-                        #[doc = " "]
+                        #[doc = concat!(" Sets the optional `", stringify!(#field_access), "` field.")]
+                        #[doc = ""]
                         #[doc = " # Arguments"]
-                        #[doc = " "]
-                        #[doc = " * `x` - The value to be wrapped in `Some` and assigned to the field."]
-                        #[doc = " "]
+                        #[doc = ""]
+                        #[doc = " * `x` - The value that will be automatically wrapped in `Some`"]
+                        #[doc = ""]
                         #[doc = " # Returns"]
-                        #[doc = " "]
-                        #[doc = " Returns `Self` to allow method chaining."]
+                        #[doc = ""]
+                        #[doc = " Returns `Self` for method chaining."]
+                        #[doc = ""]
+                        #[doc = " # Note"]
+                        #[doc = ""]
+                        #[doc = " The value is automatically wrapped in `Some`, so you don't need to pass `Some(value)`."]
+                        #[doc = ""]
+                        #[doc = " # Example"]
+                        #[doc = ""]
+                        #[doc = " ```"]
+                        #[doc = concat!("let obj = ", stringify!(#struct_name), "::default().", stringify!(#setter_name), "(value);")]
+                        #[doc = " ```"]
+                        #[doc = ""]
+                        #[doc = " ---"]
+                        #[doc = " *Generated by `aksr` - Builder pattern macro*"]
+                        #setter_inline
                         #setter_visibility fn #setter_name(mut self, x: #arg) -> Self {
                             self.#field_access = Some(x);
                             self
@@ -795,15 +974,25 @@ fn generate(
                 }
                 Tys::OptionOption => {
                     quote! {
-                        #[doc = concat!(" Sets the value of the optional `", stringify!(#field_access), "` field.")]
-                        #[doc = " "]
+                        #[doc = concat!(" Sets the optional `", stringify!(#field_access), "` field.")]
+                        #[doc = ""]
                         #[doc = " # Arguments"]
-                        #[doc = " "]
+                        #[doc = ""]
                         #[doc = " * `x` - An `Option` value to be assigned. If `None`, the field remains unchanged."]
-                        #[doc = " "]
+                        #[doc = ""]
                         #[doc = " # Returns"]
-                        #[doc = " "]
-                        #[doc = " Returns `Self` to allow method chaining."]
+                        #[doc = ""]
+                        #[doc = " Returns `Self` for method chaining."]
+                        #[doc = ""]
+                        #[doc = " # Example"]
+                        #[doc = ""]
+                        #[doc = " ```"]
+                        #[doc = concat!("let obj = ", stringify!(#struct_name), "::default().", stringify!(#setter_name), "(Some(value));")]
+                        #[doc = " ```"]
+                        #[doc = ""]
+                        #[doc = " ---"]
+                        #[doc = " *Generated by `aksr` - Builder pattern macro*"]
+                        #setter_inline
                         #setter_visibility fn #setter_name(mut self, x: #arg) -> Self {
                             if x.is_some() {
                                 self.#field_access = Some(x);
@@ -815,15 +1004,29 @@ fn generate(
                 Tys::OptionVec => {
                     let arg = arg.expect("OptionVec setter requires a generic argument");
                     quote! {
-                        #[doc = concat!(" Sets the value of the optional `", stringify!(#field_access), "` field from a slice.")]
-                        #[doc = " "]
+                        #[doc = concat!(" Sets the optional `", stringify!(#field_access), "` field from a slice.")]
+                        #[doc = ""]
                         #[doc = " # Arguments"]
-                        #[doc = " "]
-                        #[doc = " * `x` - A slice of elements to be converted into a vector and wrapped in `Some`."]
-                        #[doc = " "]
+                        #[doc = ""]
+                        #[doc = " * `x` - A slice of elements that will be automatically converted to a vector and wrapped in `Some`"]
+                        #[doc = ""]
                         #[doc = " # Returns"]
-                        #[doc = " "]
-                        #[doc = " Returns `Self` to allow method chaining."]
+                        #[doc = ""]
+                        #[doc = " Returns `Self` for method chaining."]
+                        #[doc = ""]
+                        #[doc = " # Note"]
+                        #[doc = ""]
+                        #[doc = " If the slice is empty, the field remains unchanged. Otherwise, it's automatically converted to `Vec` and wrapped in `Some`."]
+                        #[doc = ""]
+                        #[doc = " # Example"]
+                        #[doc = ""]
+                        #[doc = " ```"]
+                        #[doc = concat!("let obj = ", stringify!(#struct_name), "::default().", stringify!(#setter_name), "(&[item1, item2]);")]
+                        #[doc = " ```"]
+                        #[doc = ""]
+                        #[doc = " ---"]
+                        #[doc = " *Generated by `aksr` - Builder pattern macro*"]
+                        #setter_inline
                         #setter_visibility fn #setter_name(mut self, x: &[#arg]) -> Self {
                             if !x.is_empty() {
                                 self.#field_access = Some(x.to_vec());
@@ -834,15 +1037,29 @@ fn generate(
                 }
                 Tys::OptionVecString => {
                     quote! {
-                        #[doc = concat!(" Sets the value of the optional `", stringify!(#field_access), "` field from a slice of string slices.")]
-                        #[doc = " "]
+                        #[doc = concat!(" Sets the optional `", stringify!(#field_access), "` field from a slice of string slices.")]
+                        #[doc = ""]
                         #[doc = " # Arguments"]
-                        #[doc = " "]
-                        #[doc = " * `x` - A slice of string slices to be converted into a vector of `String` and wrapped in `Some`."]
-                        #[doc = " "]
+                        #[doc = ""]
+                        #[doc = " * `x` - A slice of string slices that will be automatically converted to `Vec<String>` and wrapped in `Some`"]
+                        #[doc = ""]
                         #[doc = " # Returns"]
-                        #[doc = " "]
-                        #[doc = " Returns `Self` to allow method chaining."]
+                        #[doc = ""]
+                        #[doc = " Returns `Self` for method chaining."]
+                        #[doc = ""]
+                        #[doc = " # Note"]
+                        #[doc = ""]
+                        #[doc = " If the slice is empty, the field remains unchanged. Otherwise, it's automatically converted to `Vec<String>` and wrapped in `Some`."]
+                        #[doc = ""]
+                        #[doc = " # Example"]
+                        #[doc = ""]
+                        #[doc = " ```"]
+                        #[doc = concat!("let obj = ", stringify!(#struct_name), "::default().", stringify!(#setter_name), "(&[\"str1\", \"str2\"]);")]
+                        #[doc = " ```"]
+                        #[doc = ""]
+                        #[doc = " ---"]
+                        #[doc = " *Generated by `aksr` - Builder pattern macro*"]
+                        #setter_inline
                         #setter_visibility fn #setter_name(mut self, x: &[&str]) -> Self {
                             if !x.is_empty() {
                                 self.#field_access = Some(x.iter().map(|s| s.to_string()).collect());
@@ -855,19 +1072,31 @@ fn generate(
                     let setter_name_owned =
                         Ident::new(&format!("{setter_name}_owned"), Span::call_site());
                     quote! {
-                        #[doc = concat!(" Sets the value of the optional `", stringify!(#field_access), "` field from a slice of owned strings.")]
-                        #[doc = " "]
+                        #[doc = concat!(" Sets the optional `", stringify!(#field_access), "` field from a slice of owned strings.")]
+                        #[doc = ""]
                         #[doc = " # Arguments"]
-                        #[doc = " "]
-                        #[doc = " * `x` - A slice of `String` to be cloned into a vector and wrapped in `Some`."]
-                        #[doc = " "]
+                        #[doc = ""]
+                        #[doc = " * `x` - A slice of `String` that will be automatically cloned into a vector and wrapped in `Some`"]
+                        #[doc = ""]
                         #[doc = " # Returns"]
-                        #[doc = " "]
-                        #[doc = " Returns `Self` to allow method chaining."]
-                        #[doc = " "]
+                        #[doc = ""]
+                        #[doc = " Returns `Self` for method chaining."]
+                        #[doc = ""]
                         #[doc = " # Note"]
-                        #[doc = " "]
-                        #[doc = " This method is useful when you already have a `Vec<String>` and want to avoid converting to `&[&str]`."]
+                        #[doc = ""]
+                        #[doc = " This method is useful when you already have a `Vec<String>` and want to avoid converting to `&[&str]`. "]
+                        #[doc = " If the slice is empty, the field remains unchanged. Otherwise, it's automatically wrapped in `Some`."]
+                        #[doc = ""]
+                        #[doc = " # Example"]
+                        #[doc = ""]
+                        #[doc = " ```"]
+                        #[doc = concat!(" let strings = vec![String::from(\"a\")];")]
+                        #[doc = concat!("let obj = ", stringify!(#struct_name), "::default().", stringify!(#setter_name_owned), "(&strings);")]
+                        #[doc = " ```"]
+                        #[doc = ""]
+                        #[doc = " ---"]
+                        #[doc = " *Generated by `aksr` - Builder pattern macro*"]
+                        #setter_inline
                         #setter_visibility fn #setter_name_owned(mut self, x: &[String]) -> Self {
                             if !x.is_empty() {
                                 self.#field_access = Some(x.to_vec());
@@ -878,15 +1107,29 @@ fn generate(
                 }
                 Tys::OptionString => {
                     quote! {
-                        #[doc = concat!(" Sets the value of the optional `", stringify!(#field_access), "` field from a string slice.")]
-                        #[doc = " "]
+                        #[doc = concat!(" Sets the optional `", stringify!(#field_access), "` field from a string slice.")]
+                        #[doc = ""]
                         #[doc = " # Arguments"]
-                        #[doc = " "]
-                        #[doc = " * `x` - A string slice to be converted into a `String` and wrapped in `Some`."]
-                        #[doc = " "]
+                        #[doc = ""]
+                        #[doc = " * `x` - A string slice that will be automatically converted to `String` and wrapped in `Some`"]
+                        #[doc = ""]
                         #[doc = " # Returns"]
-                        #[doc = " "]
-                        #[doc = " Returns `Self` to allow method chaining."]
+                        #[doc = ""]
+                        #[doc = " Returns `Self` for method chaining."]
+                        #[doc = ""]
+                        #[doc = " # Note"]
+                        #[doc = ""]
+                        #[doc = " The string slice is automatically converted to `String` and wrapped in `Some`."]
+                        #[doc = ""]
+                        #[doc = " # Example"]
+                        #[doc = ""]
+                        #[doc = " ```"]
+                        #[doc = concat!("let obj = ", stringify!(#struct_name), "::default().", stringify!(#setter_name), "(\"value\");")]
+                        #[doc = " ```"]
+                        #[doc = ""]
+                        #[doc = " ---"]
+                        #[doc = " *Generated by `aksr` - Builder pattern macro*"]
+                        #setter_inline
                         #setter_visibility fn #setter_name(mut self, x: &str) -> Self {
                             self.#field_access = Some(x.to_string());
                             self
@@ -904,6 +1147,17 @@ fn generate(
                 Tys::Basic => {
                     quote! {
                         #[doc = concat!(" Returns the value of the `", stringify!(#field_access), "` field.")]
+                        #[doc = ""]
+                        #[doc = " # Example"]
+                        #[doc = ""]
+                        #[doc = " ```"]
+                        #[doc = concat!(" let obj = ", stringify!(#struct_name), "::default();")]
+                        #[doc = concat!(" let value = obj.", stringify!(#getter_name), "();")]
+                        #[doc = " ```"]
+                        #[doc = ""]
+                        #[doc = " ---"]
+                        #[doc = " *Generated by `aksr` - Builder pattern macro*"]
+                        #getter_inline
                         #getter_visibility fn #getter_name(&self) -> #field_type {
                             self.#field_access
                         }
@@ -912,6 +1166,17 @@ fn generate(
                 Tys::Ref => {
                     quote! {
                         #[doc = concat!(" Returns a reference to the `", stringify!(#field_access), "` field.")]
+                        #[doc = ""]
+                        #[doc = " # Example"]
+                        #[doc = ""]
+                        #[doc = " ```"]
+                        #[doc = concat!(" let obj = ", stringify!(#struct_name), "::default();")]
+                        #[doc = concat!(" let value = obj.", stringify!(#getter_name), "();")]
+                        #[doc = " ```"]
+                        #[doc = ""]
+                        #[doc = " ---"]
+                        #[doc = " *Generated by `aksr` - Builder pattern macro*"]
+                        #getter_inline
                         #getter_visibility fn #getter_name(&self) -> &#field_type {
                             &self.#field_access
                         }
@@ -920,6 +1185,17 @@ fn generate(
                 Tys::String => {
                     quote! {
                         #[doc = concat!(" Returns a string slice of the `", stringify!(#field_access), "` field.")]
+                        #[doc = ""]
+                        #[doc = " # Example"]
+                        #[doc = ""]
+                        #[doc = " ```"]
+                        #[doc = concat!(" let obj = ", stringify!(#struct_name), "::default();")]
+                        #[doc = concat!(" let value = obj.", stringify!(#getter_name), "();")]
+                        #[doc = " ```"]
+                        #[doc = ""]
+                        #[doc = " ---"]
+                        #[doc = " *Generated by `aksr` - Builder pattern macro*"]
+                        #getter_inline
                         #getter_visibility fn #getter_name(&self) -> &str {
                             &self.#field_access
                         }
@@ -928,7 +1204,18 @@ fn generate(
                 Tys::Vec => {
                     let arg = arg.expect("Vec getter requires a generic argument");
                     quote! {
-                        #[doc = concat!(" Returns a slice of the `", stringify!(#field_access), "` field.")]
+                        #[doc = concat!(" Returns a slice view of the `", stringify!(#field_access), "` field.")]
+                        #[doc = ""]
+                        #[doc = " # Example"]
+                        #[doc = ""]
+                        #[doc = " ```"]
+                        #[doc = concat!(" let obj = ", stringify!(#struct_name), "::default();")]
+                        #[doc = concat!(" let items = obj.", stringify!(#getter_name), "();")]
+                        #[doc = " ```"]
+                        #[doc = ""]
+                        #[doc = " ---"]
+                        #[doc = " *Generated by `aksr` - Builder pattern macro*"]
+                        #getter_inline
                         #getter_visibility fn #getter_name(&self) -> &[#arg] {
                             &self.#field_access
                         }
@@ -938,6 +1225,17 @@ fn generate(
                     let arg = arg.expect("Option getter requires a generic argument");
                     quote! {
                         #[doc = concat!(" Returns the value of the optional `", stringify!(#field_access), "` field.")]
+                        #[doc = ""]
+                        #[doc = " # Example"]
+                        #[doc = ""]
+                        #[doc = " ```"]
+                        #[doc = concat!(" let obj = ", stringify!(#struct_name), "::default();")]
+                        #[doc = concat!(" let value = obj.", stringify!(#getter_name), "();")]
+                        #[doc = " ```"]
+                        #[doc = ""]
+                        #[doc = " ---"]
+                        #[doc = " *Generated by `aksr` - Builder pattern macro*"]
+                        #getter_inline
                         #getter_visibility fn #getter_name(&self) -> Option<#arg> {
                             self.#field_access
                         }
@@ -947,6 +1245,17 @@ fn generate(
                     let arg = arg.expect("OptionAsRef getter requires a generic argument");
                     quote! {
                         #[doc = concat!(" Returns an optional reference to the `", stringify!(#field_access), "` field.")]
+                        #[doc = ""]
+                        #[doc = " # Example"]
+                        #[doc = ""]
+                        #[doc = " ```"]
+                        #[doc = concat!(" let obj = ", stringify!(#struct_name), "::default();")]
+                        #[doc = concat!(" let value = obj.", stringify!(#getter_name), "();")]
+                        #[doc = " ```"]
+                        #[doc = ""]
+                        #[doc = " ---"]
+                        #[doc = " *Generated by `aksr` - Builder pattern macro*"]
+                        #getter_inline
                         #getter_visibility fn #getter_name(&self) -> Option<&#arg> {
                             self.#field_access.as_ref()
                         }
@@ -955,6 +1264,17 @@ fn generate(
                 Tys::OptionString => {
                     quote! {
                         #[doc = concat!(" Returns an optional string slice of the `", stringify!(#field_access), "` field.")]
+                        #[doc = ""]
+                        #[doc = " # Example"]
+                        #[doc = ""]
+                        #[doc = " ```"]
+                        #[doc = concat!(" let obj = ", stringify!(#struct_name), "::default();")]
+                        #[doc = concat!(" let value = obj.", stringify!(#getter_name), "();")]
+                        #[doc = " ```"]
+                        #[doc = ""]
+                        #[doc = " ---"]
+                        #[doc = " *Generated by `aksr` - Builder pattern macro*"]
+                        #getter_inline
                         #getter_visibility fn #getter_name(&self) -> Option<&str> {
                             self.#field_access.as_deref()
                         }
@@ -963,7 +1283,18 @@ fn generate(
                 Tys::OptionVec => {
                     let arg = arg.expect("OptionVec getter requires a generic argument");
                     quote! {
-                        #[doc = concat!(" Returns an optional slice of the `", stringify!(#field_access), "` field.")]
+                        #[doc = concat!(" Returns an optional slice view of the `", stringify!(#field_access), "` field.")]
+                        #[doc = ""]
+                        #[doc = " # Example"]
+                        #[doc = ""]
+                        #[doc = " ```"]
+                        #[doc = concat!(" let obj = ", stringify!(#struct_name), "::default();")]
+                        #[doc = concat!(" let items = obj.", stringify!(#getter_name), "();")]
+                        #[doc = " ```"]
+                        #[doc = ""]
+                        #[doc = " ---"]
+                        #[doc = " *Generated by `aksr` - Builder pattern macro*"]
+                        #getter_inline
                         #getter_visibility fn #getter_name(&self) -> Option<&[#arg]> {
                             self.#field_access.as_deref()
                         }
