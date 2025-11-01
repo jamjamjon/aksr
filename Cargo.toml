@@ -1,6 +1,6 @@
 [package]
 name = "aksr"
-version = "0.0.5"
+version = "0.0.6"
 edition = "2021"
 rust-version = "1.68"
 description = "A Rust derive macro designed to automatically generate getter and setter methods for both named and tuple structs."
