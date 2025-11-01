@@ -379,7 +379,7 @@ impl Rules {
                         let getter_name = if actual_getter_prefix.is_empty() {
                             format!("{alias}")
                         } else {
-                            format!("{}_{}", actual_getter_prefix, alias)
+                            format!("{actual_getter_prefix}_{alias}")
                         };
                         let getter_name = Ident::new(&getter_name, Span::call_site());
                         (setter_name, getter_name)
@@ -391,7 +391,7 @@ impl Rules {
                         let setter_name = Ident::new(&setter_name, Span::call_site());
 
                         // getter: use actual_getter_prefix (which defaults to "nth" for tuple structs)
-                        let getter_name = format!("{}_{}", actual_getter_prefix, idx);
+                        let getter_name = format!("{actual_getter_prefix}_{idx}");
                         let getter_name = Ident::new(&getter_name, Span::call_site());
                         (setter_name, getter_name)
                     }
