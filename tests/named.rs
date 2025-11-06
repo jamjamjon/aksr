@@ -506,6 +506,41 @@ fn all() {
     assert_eq!(entity.result(), &Ok(1));
 }
 
+#[test]
+fn into_and_take_on_owned_fields() {
+    // into_vec_string: consume self, move out Vec<String>
+    let entity = Entity::<u8, String>::default().with_vec_string(&["a", "b"]);
+    let items = entity.into_vec_string();
+    assert_eq!(items, vec!["a", "b"]);
+
+    // take_vec_string: move out, leave default (empty Vec)
+    let mut e2 = Entity::<u8, String>::default().with_vec_string(&["x", "y"]);
+    let taken = e2.take_vec_string();
+    assert_eq!(taken, vec!["x", "y"]);
+    assert!(e2.vec_string().is_empty());
+
+    // into_string: consume self, move out String
+    let e3 = Entity::<u8, String>::default().with_string("hello");
+    let s = e3.into_string();
+    assert_eq!(s, "hello");
+
+    // take_string: move out, leave default (empty String)
+    let mut e4 = Entity::<u8, String>::default().with_string("world");
+    let s2 = e4.take_string();
+    assert_eq!(s2, "world");
+    assert_eq!(e4.string(), "");
+
+    // Option<String>: into_*, take_*
+    let e5 = Entity::<u8, String>::default().with_opt_string("opt");
+    let opt = e5.into_opt_string();
+    assert_eq!(opt, Some("opt".to_string()));
+
+    let mut e6 = Entity::<u8, String>::default().with_opt_string("z");
+    let taken_opt = e6.take_opt_string();
+    assert_eq!(taken_opt, Some("z".to_string()));
+    assert_eq!(e6.opt_string(), None);
+}
+
 // Test empty Vec handling
 #[test]
 fn test_empty_vec_should_not_update() {
@@ -704,4 +739,441 @@ fn test_prefix_combinations() {
     assert_eq!(test.get_alias_getter(), 600);
     assert_eq!(test.get_full_custom(), 700);
     assert_eq!(test.direct_name(), "direct");
+}
+
+#[derive(Builder, Debug, Default)]
+struct IntoTest {
+    // Primitive types should NOT have into_* methods
+    usize_field: usize,
+    bool_field: bool,
+
+    // Owned types should have into_* methods
+    string_field: String,
+    vec_field: Vec<u8>,
+
+    // Can disable into_* with except(into)
+    #[args(except(into))]
+    disabled_into: String,
+
+    // Can customize into prefix
+    #[args(into_prefix = "extract")]
+    custom_prefix: Vec<String>,
+}
+
+#[test]
+fn test_primitive_no_into() {
+    // Primitive types should NOT have into_* methods
+    let test = IntoTest::default()
+        .with_usize_field(42)
+        .with_bool_field(true);
+
+    assert_eq!(test.usize_field(), 42);
+    assert!(test.bool_field());
+    // test.into_usize_field() should NOT exist - compile error if uncommented
+    // test.into_bool_field() should NOT exist - compile error if uncommented
+}
+
+#[test]
+fn test_owned_types_have_into() {
+    // Owned types should have both getters (returning &T) and into_* methods
+    let test = IntoTest::default()
+        .with_string_field("hello")
+        .with_vec_field(&[1, 2, 3]);
+
+    assert_eq!(test.string_field(), "hello");
+    let moved_string = test.into_string_field();
+    assert_eq!(moved_string, "hello");
+}
+
+#[test]
+fn test_vec_into() {
+    let test = IntoTest::default().with_vec_field(&[1, 2, 3]);
+    assert_eq!(test.vec_field(), &[1, 2, 3]);
+    let moved_vec = test.into_vec_field();
+    assert_eq!(moved_vec, vec![1, 2, 3]);
+}
+
+#[test]
+fn test_except_into() {
+    // except(into): should have getter but NO into_* method
+    let test = IntoTest::default().with_disabled_into("test");
+    assert_eq!(test.disabled_into(), "test");
+    // test.into_disabled_into() should NOT exist - compile error if uncommented
+}
+
+#[test]
+fn test_custom_into_prefix() {
+    // Custom prefix: should use "extract_" instead of "into_"
+    let test = IntoTest::default().with_custom_prefix(&["a", "b"]);
+    assert_eq!(test.custom_prefix(), &["a", "b"]);
+    let extracted = test.extract_custom_prefix();
+    assert_eq!(extracted, vec!["a", "b"]);
+    // test.into_custom_prefix() should NOT exist - compile error if uncommented
+}
+
+// Comprehensive test struct for into_* and take_* methods
+#[derive(Builder, Debug, Default)]
+struct ComprehensiveTest {
+    // Vec types
+    vec_i32: Vec<i32>,
+    vec_string: Vec<String>,
+
+    // String
+    string: String,
+
+    // Option types
+    opt_string: Option<String>,
+    opt_vec: Option<Vec<i32>>,
+    opt_i32: Option<i32>,
+
+    // Collections
+    hashmap: HashMap<String, i32>,
+    hashset: HashSet<String>,
+    btreemap: BTreeMap<String, i32>,
+    btreeset: BTreeSet<String>,
+
+    // Smart pointers
+    box_u8: Box<u8>,
+
+    // Arrays and tuples
+    array: [i32; 3],
+    tuple: (String, i32),
+}
+
+#[test]
+fn test_into_vec_types() {
+    // Test into_vec_i32
+    let test = ComprehensiveTest::default().with_vec_i32(&[1, 2, 3, 4, 5]);
+
+    assert_eq!(test.vec_i32(), &[1, 2, 3, 4, 5]);
+    let moved = test.into_vec_i32();
+    assert_eq!(moved, vec![1, 2, 3, 4, 5]);
+
+    // Test into_vec_string
+    let test2 = ComprehensiveTest::default().with_vec_string(&["a", "b", "c"]);
+
+    assert_eq!(test2.vec_string(), &["a", "b", "c"]);
+    let moved2 = test2.into_vec_string();
+    assert_eq!(moved2, vec!["a", "b", "c"]);
+}
+
+#[test]
+fn test_take_vec_types() {
+    // Test take_vec_i32
+    let mut test = ComprehensiveTest::default().with_vec_i32(&[10, 20, 30]);
+
+    assert_eq!(test.vec_i32(), &[10, 20, 30]);
+    let taken = test.take_vec_i32();
+    assert_eq!(taken, vec![10, 20, 30]);
+    assert!(test.vec_i32().is_empty()); // Should be empty after take
+
+    // Test take_vec_string
+    let mut test2 = ComprehensiveTest::default().with_vec_string(&["x", "y", "z"]);
+
+    assert_eq!(test2.vec_string(), &["x", "y", "z"]);
+    let taken2 = test2.take_vec_string();
+    assert_eq!(taken2, vec!["x", "y", "z"]);
+    assert!(test2.vec_string().is_empty()); // Should be empty after take
+}
+
+#[test]
+fn test_into_string() {
+    let test = ComprehensiveTest::default().with_string("hello world");
+
+    assert_eq!(test.string(), "hello world");
+    let moved = test.into_string();
+    assert_eq!(moved, "hello world");
+}
+
+#[test]
+fn test_take_string() {
+    let mut test = ComprehensiveTest::default().with_string("test string");
+
+    assert_eq!(test.string(), "test string");
+    let taken = test.take_string();
+    assert_eq!(taken, "test string");
+    assert_eq!(test.string(), ""); // Should be empty after take
+}
+
+#[test]
+fn test_into_option_types() {
+    // Test into_opt_string with Some
+    let test = ComprehensiveTest::default().with_opt_string("some value");
+
+    assert_eq!(test.opt_string(), Some("some value"));
+    let moved = test.into_opt_string();
+    assert_eq!(moved, Some("some value".to_string()));
+
+    // Test into_opt_string with None
+    let test2 = ComprehensiveTest::default();
+    assert_eq!(test2.opt_string(), None);
+    let moved2 = test2.into_opt_string();
+    assert_eq!(moved2, None);
+
+    // Test into_opt_vec with Some
+    let test3 = ComprehensiveTest::default().with_opt_vec(&[1, 2, 3]);
+
+    assert_eq!(test3.opt_vec(), Some(&[1, 2, 3][..]));
+    let moved3 = test3.into_opt_vec();
+    assert_eq!(moved3, Some(vec![1, 2, 3]));
+
+    // Test into_opt_i32 with Some
+    let test4 = ComprehensiveTest::default().with_opt_i32(42);
+
+    assert_eq!(test4.opt_i32(), Some(42));
+    let moved4 = test4.into_opt_i32();
+    assert_eq!(moved4, Some(42));
+}
+
+#[test]
+fn test_take_option_types() {
+    // Test take_opt_string with Some
+    let mut test = ComprehensiveTest::default().with_opt_string("take me");
+
+    assert_eq!(test.opt_string(), Some("take me"));
+    let taken = test.take_opt_string();
+    assert_eq!(taken, Some("take me".to_string()));
+    assert_eq!(test.opt_string(), None); // Should be None after take
+
+    // Test take_opt_string with None
+    let mut test2 = ComprehensiveTest::default();
+    assert_eq!(test2.opt_string(), None);
+    let taken2 = test2.take_opt_string();
+    assert_eq!(taken2, None);
+    assert_eq!(test2.opt_string(), None); // Should still be None
+
+    // Test take_opt_vec with Some
+    let mut test3 = ComprehensiveTest::default().with_opt_vec(&[5, 6, 7]);
+
+    assert_eq!(test3.opt_vec(), Some(&[5, 6, 7][..]));
+    let taken3 = test3.take_opt_vec();
+    assert_eq!(taken3, Some(vec![5, 6, 7]));
+    assert_eq!(test3.opt_vec(), None); // Should be None after take
+
+    // Test take_opt_i32 with Some
+    let mut test4 = ComprehensiveTest::default().with_opt_i32(100);
+
+    assert_eq!(test4.opt_i32(), Some(100));
+    let taken4 = test4.take_opt_i32();
+    assert_eq!(taken4, Some(100));
+    assert_eq!(test4.opt_i32(), None); // Should be None after take
+}
+
+#[test]
+fn test_into_collections() {
+    // Test into_hashmap
+    let mut map = HashMap::new();
+    map.insert("key1".to_string(), 1);
+    map.insert("key2".to_string(), 2);
+
+    let test = ComprehensiveTest::default().with_hashmap(map.clone());
+
+    assert_eq!(test.hashmap(), &map);
+    let moved = test.into_hashmap();
+    assert_eq!(moved, map);
+
+    // Test into_hashset
+    let set: HashSet<String> = ["a".to_string(), "b".to_string()].iter().cloned().collect();
+    let test2 = ComprehensiveTest::default().with_hashset(set.clone());
+
+    assert_eq!(test2.hashset(), &set);
+    let moved2 = test2.into_hashset();
+    assert_eq!(moved2, set);
+
+    // Test into_btreemap
+    let mut bmap = BTreeMap::new();
+    bmap.insert("k1".to_string(), 10);
+    bmap.insert("k2".to_string(), 20);
+
+    let test3 = ComprehensiveTest::default().with_btreemap(bmap.clone());
+
+    assert_eq!(test3.btreemap(), &bmap);
+    let moved3 = test3.into_btreemap();
+    assert_eq!(moved3, bmap);
+
+    // Test into_btreeset
+    let bset: BTreeSet<String> = ["x".to_string(), "y".to_string()].iter().cloned().collect();
+    let test4 = ComprehensiveTest::default().with_btreeset(bset.clone());
+
+    assert_eq!(test4.btreeset(), &bset);
+    let moved4 = test4.into_btreeset();
+    assert_eq!(moved4, bset);
+}
+
+#[test]
+fn test_take_collections() {
+    // Test take_hashmap
+    let mut map = HashMap::new();
+    map.insert("k1".to_string(), 1);
+
+    let mut test = ComprehensiveTest::default().with_hashmap(map.clone());
+
+    assert_eq!(test.hashmap(), &map);
+    let taken = test.take_hashmap();
+    assert_eq!(taken, map);
+    assert!(test.hashmap().is_empty()); // Should be empty after take
+
+    // Test take_hashset
+    let set: HashSet<String> = ["a".to_string()].iter().cloned().collect();
+    let mut test2 = ComprehensiveTest::default().with_hashset(set.clone());
+
+    assert_eq!(test2.hashset(), &set);
+    let taken2 = test2.take_hashset();
+    assert_eq!(taken2, set);
+    assert!(test2.hashset().is_empty()); // Should be empty after take
+
+    // Test take_btreemap
+    let mut bmap = BTreeMap::new();
+    bmap.insert("k".to_string(), 5);
+
+    let mut test3 = ComprehensiveTest::default().with_btreemap(bmap.clone());
+
+    assert_eq!(test3.btreemap(), &bmap);
+    let taken3 = test3.take_btreemap();
+    assert_eq!(taken3, bmap);
+    assert!(test3.btreemap().is_empty()); // Should be empty after take
+
+    // Test take_btreeset
+    let bset: BTreeSet<String> = ["z".to_string()].iter().cloned().collect();
+    let mut test4 = ComprehensiveTest::default().with_btreeset(bset.clone());
+
+    assert_eq!(test4.btreeset(), &bset);
+    let taken4 = test4.take_btreeset();
+    assert_eq!(taken4, bset);
+    assert!(test4.btreeset().is_empty()); // Should be empty after take
+}
+
+#[test]
+fn test_into_smart_pointers() {
+    // Test into_box_u8
+    let test = ComprehensiveTest::default().with_box_u8(Box::new(42));
+
+    assert_eq!(test.box_u8(), &Box::new(42));
+    let moved = test.into_box_u8();
+    assert_eq!(*moved, 42);
+}
+
+#[test]
+fn test_take_smart_pointers() {
+    // Test take_box_u8
+    let mut test = ComprehensiveTest::default().with_box_u8(Box::new(100));
+
+    assert_eq!(test.box_u8(), &Box::new(100));
+    let taken = test.take_box_u8();
+    assert_eq!(*taken, 100);
+    // After take, should be default (0 in box)
+    assert_eq!(**test.box_u8(), 0);
+}
+
+#[test]
+fn test_into_arrays_and_tuples() {
+    // Test into_array
+    let test = ComprehensiveTest::default().with_array([1, 2, 3]);
+
+    assert_eq!(test.array(), &[1, 2, 3]);
+    let moved = test.into_array();
+    assert_eq!(moved, [1, 2, 3]);
+
+    // Test into_tuple
+    let test2 = ComprehensiveTest::default().with_tuple(("hello".to_string(), 42));
+
+    assert_eq!(test2.tuple(), &("hello".to_string(), 42));
+    let moved2 = test2.into_tuple();
+    assert_eq!(moved2, ("hello".to_string(), 42));
+}
+
+#[test]
+fn test_into_consumes_self() {
+    // Verify that into_* consumes self
+    let test = ComprehensiveTest::default()
+        .with_string("test")
+        .with_vec_i32(&[1, 2]);
+
+    let _moved_string = test.into_string();
+    // test is now consumed, cannot use it anymore
+    // This is verified by compilation - if we try to use test here, it won't compile
+}
+
+#[test]
+fn test_take_preserves_self() {
+    // Verify that take_* preserves self
+    let mut test = ComprehensiveTest::default()
+        .with_string("test")
+        .with_vec_i32(&[1, 2, 3])
+        .with_opt_string("optional");
+
+    let moved_string = test.take_string();
+    assert_eq!(moved_string, "test");
+    assert_eq!(test.string(), ""); // Can still use test
+
+    let moved_vec = test.take_vec_i32();
+    assert_eq!(moved_vec, vec![1, 2, 3]);
+    assert!(test.vec_i32().is_empty()); // Can still use test
+
+    let moved_opt = test.take_opt_string();
+    assert_eq!(moved_opt, Some("optional".to_string()));
+    assert_eq!(test.opt_string(), None); // Can still use test
+
+    // Verify we can still set new values
+    let _test2 = test.with_string("new value");
+}
+
+#[test]
+fn test_multiple_take_operations() {
+    // Test multiple take operations on the same struct
+    let mut test = ComprehensiveTest::default()
+        .with_string("first")
+        .with_vec_i32(&[1])
+        .with_opt_string("second");
+
+    let s1 = test.take_string();
+    assert_eq!(s1, "first");
+
+    let v1 = test.take_vec_i32();
+    assert_eq!(v1, vec![1]);
+
+    let o1 = test.take_opt_string();
+    assert_eq!(o1, Some("second".to_string()));
+
+    // All fields should be in default state
+    assert_eq!(test.string(), "");
+    assert!(test.vec_i32().is_empty());
+    assert_eq!(test.opt_string(), None);
+}
+
+#[test]
+fn test_into_with_empty_values() {
+    // Test into_* with empty collections
+    let test = ComprehensiveTest::default(); // All fields are empty/default
+
+    let vec = test.into_vec_i32();
+    assert!(vec.is_empty());
+
+    let test2 = ComprehensiveTest::default();
+    let string = test2.into_string();
+    assert_eq!(string, "");
+
+    let test3 = ComprehensiveTest::default();
+    let opt = test3.into_opt_string();
+    assert_eq!(opt, None);
+}
+
+#[test]
+fn test_take_with_empty_values() {
+    // Test take_* with empty collections
+    let mut test = ComprehensiveTest::default();
+
+    let vec = test.take_vec_i32();
+    assert!(vec.is_empty());
+    assert!(test.vec_i32().is_empty()); // Still empty after take
+
+    let mut test2 = ComprehensiveTest::default();
+    let string = test2.take_string();
+    assert_eq!(string, "");
+    assert_eq!(test2.string(), ""); // Still empty after take
+
+    let mut test3 = ComprehensiveTest::default();
+    let opt = test3.take_opt_string();
+    assert_eq!(opt, None);
+    assert_eq!(test3.opt_string(), None); // Still None after take
 }

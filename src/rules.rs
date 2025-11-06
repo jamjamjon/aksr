@@ -5,8 +5,8 @@ use syn::{Expr, ExprLit, Field, Lit};
 
 use crate::{
     ALIAS, ALIAS_DEPRECATED, ALLOW, ARGS, EXCEPT, EXTEND, EXTEND_DEPRECATED, GETTER, GETTER_INLINE,
-    GETTER_PREFIX, GETTER_PREFIX_DEFAULT, GETTER_VISIBILITY, INLINE, SETTER, SETTER_INLINE,
-    SETTER_PREFIX, SETTER_PREFIX_DEFAULT, SETTER_VISIBILITY, SKIP, VISIBILITY,
+    GETTER_PREFIX, GETTER_PREFIX_DEFAULT, GETTER_VISIBILITY, INLINE, INTO_PREFIX, SETTER,
+    SETTER_INLINE, SETTER_PREFIX, SETTER_PREFIX_DEFAULT, SETTER_VISIBILITY, SKIP, VISIBILITY,
 };
 
 #[derive(Debug)]
@@ -17,6 +17,8 @@ pub(crate) struct Rules {
     pub prefix_getter: String,
     pub gen_getter: bool,
     pub gen_setter: bool,
+    pub gen_into: bool,
+    pub into_prefix: Option<String>,
     pub getter_visibility: Option<String>,
     pub setter_visibility: Option<String>,
     pub getter_inline: Option<InlineMode>,
@@ -39,6 +41,8 @@ impl Default for Rules {
             prefix_getter: String::new(), // Empty for named structs, will use "nth" for tuple structs
             gen_getter: true,
             gen_setter: true,
+            gen_into: true,
+            into_prefix: None,                        // Default: "into"
             getter_visibility: None,                  // Default: pub
             setter_visibility: None,                  // Default: pub
             getter_inline: Some(InlineMode::Always),  // Default: #[inline(always)] for getters
@@ -126,6 +130,16 @@ impl From<&Field> for Rules {
                                 );
                             }
                         }
+                        Some(INTO_PREFIX) => {
+                            if let Ok(Expr::Lit(ExprLit {
+                                lit: Lit::Str(s), ..
+                            })) = meta.value().and_then(|v| v.parse::<Expr>())
+                            {
+                                rules.into_prefix = Some(s.value());
+                            } else {
+                                return Err(meta.error("Expected a string literal for into_prefix"));
+                            }
+                        }
                         Some(GETTER_VISIBILITY) => {
                             if let Ok(Expr::Lit(ExprLit {
                                 lit: Lit::Str(s), ..
@@ -192,6 +206,7 @@ impl From<&Field> for Rules {
                                             rules.gen_setter = true;
                                         }
                                         EXTEND | EXTEND_DEPRECATED => rules.inc_for_vec = false,
+                                        "into" => rules.gen_into = false,
                                         _ => {
                                             return Err(nested.error("Unsupported except argument"))
                                         }
